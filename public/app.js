@@ -11,6 +11,10 @@
   const SPORTS = [['🏸', 'Badminton'], ['⚽', 'Football'], ['🏀', 'Basketball'], ['🏐', 'Volleyball'], ['🎾', 'Tennis'],
     ['🏓', 'Table tennis'], ['🏊', 'Swimming'], ['🏃', 'Running'], ['🚴', 'Cycling'], ['🧘', 'Yoga'], ['🏋️', 'Gym'],
     ['🥾', 'Hiking'], ['💃', 'Dance'], ['⛸️', 'Skating'], ['🥋', 'Martial arts'], ['⚾', 'Baseball']];
+  const ACTIVITIES = [['💼', 'Work'], ['📚', 'Study'], ['🏫', 'School'], ['🏆', 'Tournament'], ['⛪', 'Church'],
+    ['🧸', 'Play'], ['🎮', 'Video games'], ['📺', 'TV'], ['🛋️', 'Rest'], ['🌳', 'Park'], ['🛍️', 'Shopping'],
+    ['✈️', 'Travel'], ['🍽️', 'Eating out'], ['🎂', 'Party'], ['👪', 'Family time'], ['📖', 'Reading'],
+    ['🎨', 'Art'], ['🎵', 'Music'], ['🎬', 'Movies'], ['🧹', 'Chores']];
   const FRAMES = ['polaroid', 'tape', 'round', 'none'];
   // Doodles: drawn on the page, then kept as a sticker whose picture is a list of pen strokes.
   const DRAW_COLORS = ['#3b2a20', '#e5534b', '#f08c3a', '#f2c94c', '#5fb36b', '#3a8fd6', '#9b6bd6', '#f28cb1', '#ffffff'];
@@ -142,7 +146,7 @@
   function newEntry(extra = {}) {
     const now = Date.now();
     return {
-      id: uid(), date: todayStr(), title: '', body: '', mood: '', weather: '', sports: [],
+      id: uid(), date: todayStr(), title: '', body: '', mood: '', weather: '', sports: [], activities: [],
       theme: state?.defaultTheme || 'cat', stickers: [], shared: !!state?.shareNewPages, createdAt: now, updatedAt: now, ...extra,
     };
   }
@@ -195,6 +199,7 @@
     if (!e || typeof e !== 'object') return null;
     const str = (v, max = 100000) => (typeof v === 'string' ? v.slice(0, max) : '');
     const num = (v, d) => (Number.isFinite(v) ? v : d);
+    const known = (v, list) => [...new Set(Array.isArray(v) ? v : [])].filter(x => list.some(([emo]) => emo === x));
     const date = /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayStr();
     return {
       id: str(e.id, 40) || uid(),
@@ -203,7 +208,8 @@
       body: str(e.body),
       mood: str(e.mood, 16),
       weather: str(e.weather, 16),
-      sports: [...new Set(Array.isArray(e.sports) ? e.sports : [])].filter(v => SPORTS.some(([emo]) => emo === v)),
+      sports: known(e.sports, SPORTS),
+      activities: known(e.activities, ACTIVITIES),
       theme: THEMES[e.theme] ? e.theme : 'cat',
       stickers: (Array.isArray(e.stickers) ? e.stickers : [])
         .filter(s => s && typeof s.ref === 'string')
@@ -343,7 +349,7 @@
     title: $('titleInput'), body: $('bodyInput'),
     dateBadge: $('dateBadge'), dateInput: $('dateInput'), dateDay: $('dateDay'), dateMonth: $('dateMonth'), dateWeek: $('dateWeek'),
     moodBtn: $('moodBtn'), moodPop: $('moodPop'), weatherBtn: $('weatherBtn'), weatherPop: $('weatherPop'),
-    sportBtn: $('sportBtn'), sportPop: $('sportPop'), drawBtn: $('drawBtn'),
+    sportBtn: $('sportBtn'), sportPop: $('sportPop'), activityBtn: $('activityBtn'), activityPop: $('activityPop'), drawBtn: $('drawBtn'),
     templates: $('templates'), list: $('entryList'), search: $('search'), viewSeg: $('viewSeg'),
     photoBtn: $('photoBtn'), photoInput: $('photoInput'),
     trayTabs: $('trayTabs'), trayGrid: $('trayGrid'), tray: $('tray'), fab: $('stickerFab'), trayClose: $('trayClose'),
@@ -476,21 +482,29 @@
         : `<span class="emo">＋</span><span class="label">${name}</span>`;
     };
     els.moodBtn.innerHTML = label(MOODS, entry.mood, 'Mood');
+    els.moodBtn.title = 'Mood';
     els.moodBtn.classList.toggle('set', !!entry.mood);
     els.weatherBtn.innerHTML = label(WEATHERS, entry.weather, 'Weather');
+    els.weatherBtn.title = 'Weather';
     els.weatherBtn.classList.toggle('set', !!entry.weather);
     els.moodPop.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === entry.mood && !!b.dataset.v));
     els.weatherPop.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === entry.weather && !!b.dataset.v));
-    const sports = SPORTS.filter(([emo]) => entry.sports.includes(emo));
-    els.sportBtn.innerHTML = sports.length
-      ? `<span class="emo">${sports.map(([emo]) => emo).join('')}</span><span class="label">${sports.length === 1 ? sports[0][1] : `${sports.length} sports`}</span>`
-      : '<span class="emo">＋</span><span class="label">Sport</span>';
-    els.sportBtn.classList.toggle('set', sports.length > 0);
-    els.sportPop.querySelectorAll('button').forEach(b => {
-      const on = entry.sports.includes(b.dataset.v);
-      b.classList.toggle('on', on);
-      if (b.dataset.v) b.setAttribute('aria-pressed', on);
-    });
+    // Pickers where several can be chosen: the button shows all the emoji, and "n sports" when more than one.
+    const multiLabel = (btn, pop, list, picked, name, many) => {
+      const chosen = list.filter(([emo]) => picked.includes(emo));
+      btn.innerHTML = chosen.length
+        ? `<span class="emo">${chosen.map(([emo]) => emo).join('')}</span><span class="label">${chosen.length === 1 ? chosen[0][1] : `${chosen.length} ${many}`}</span>`
+        : `<span class="emo">＋</span><span class="label">${name}</span>`;
+      btn.classList.toggle('set', chosen.length > 0);
+      btn.title = name;
+      pop.querySelectorAll('button').forEach(b => {
+        const on = picked.includes(b.dataset.v);
+        b.classList.toggle('on', on);
+        if (b.dataset.v) b.setAttribute('aria-pressed', on);
+      });
+    };
+    multiLabel(els.sportBtn, els.sportPop, SPORTS, entry.sports, 'Sport', 'sports');
+    multiLabel(els.activityBtn, els.activityPop, ACTIVITIES, entry.activities, 'Activity', 'activities');
     els.shareBtn.innerHTML = entry.shared
       ? '<span class="emo">👫</span><span class="label">Friends can read</span>'
       : '<span class="emo">🔒</span><span class="label">Only me</span>';
@@ -1168,7 +1182,7 @@
     if (shift) pop.style.left = `${shift}px`;
   }
 
-  // multi: several can be picked (sports), and the picker stays open while picking.
+  // multi: several can be picked (sports, activities), and the picker stays open while picking.
   function setupPicker(btn, pop, options, key, { multi = false } = {}) {
     pop.innerHTML = options.map(([emo, name]) => `<button type="button" data-v="${emo}" title="${name}" aria-label="${name}">${emo}</button>`).join('') +
       `<button type="button" class="clear" data-v="" title="Clear">clear</button>`;
@@ -1199,7 +1213,7 @@
     });
   }
   function closePops() {
-    [[els.moodBtn, els.moodPop], [els.weatherBtn, els.weatherPop], [els.sportBtn, els.sportPop]].forEach(([btn, pop]) => {
+    [[els.moodBtn, els.moodPop], [els.weatherBtn, els.weatherPop], [els.sportBtn, els.sportPop], [els.activityBtn, els.activityPop]].forEach(([btn, pop]) => {
       pop.hidden = true;
       btn.setAttribute('aria-expanded', 'false');
     });
@@ -1207,6 +1221,7 @@
   setupPicker(els.moodBtn, els.moodPop, MOODS, 'mood');
   setupPicker(els.weatherBtn, els.weatherPop, WEATHERS, 'weather');
   setupPicker(els.sportBtn, els.sportPop, SPORTS, 'sports', { multi: true });
+  setupPicker(els.activityBtn, els.activityPop, ACTIVITIES, 'activities', { multi: true });
   document.addEventListener('click', e => { if (!e.target.closest('.picker')) closePops(); });
 
   els.templates.addEventListener('click', e => {
@@ -1356,7 +1371,7 @@
       `<div class="page-head"><div class="date-badge"><span class="date-day">${d.getDate()}</span><span class="date-meta">` +
       `<span class="date-month">${d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>` +
       `<span class="date-week">${d.toLocaleDateString(undefined, { weekday: 'long' })}</span></span></div>` +
-      `${tag(MOODS, entry.mood)}${tag(WEATHERS, entry.weather)}${entry.sports.map(v => tag(SPORTS, v)).join('')}</div>` +
+      `${tag(MOODS, entry.mood)}${tag(WEATHERS, entry.weather)}${entry.sports.map(v => tag(SPORTS, v)).join('')}${entry.activities.map(v => tag(ACTIVITIES, v)).join('')}</div>` +
       `<h2 class="entry-title">${escape(entry.title || 'Untitled page')}</h2>` +
       `<div class="entry-body">${escape(entry.body)}</div>` +
       `<div class="sticker-layer">${stickers}</div></article></div>`;
