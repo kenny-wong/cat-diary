@@ -2,7 +2,7 @@
 
 A cute, decorated online diary. Everyone gets their own private diary: sign up with email and password or continue with Google, and your pages follow you to any phone or computer.
 
-Live at **https://cat-diary-b6y.pages.dev**
+Live at **https://my-little-diary.pages.dev**
 
 ## Features
 
@@ -62,7 +62,7 @@ For local development put the same names in `.dev.vars` (never committed).
 
 1. Go to https://console.cloud.google.com/, create a project, then **APIs & Services → OAuth consent screen**: choose *External*, fill in the app name and your email, and publish the app.
 2. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type *Web application*.
-3. Under **Authorized redirect URIs** add `https://cat-diary-b6y.pages.dev/api/auth/google/callback` (and `http://localhost:8790/api/auth/google/callback` for local testing).
+3. Under **Authorized redirect URIs** add `https://my-little-diary.pages.dev/api/auth/google/callback` (and `http://localhost:8790/api/auth/google/callback` for local testing).
 4. Put the client ID and secret into the Cloudflare settings above, then redeploy.
 
 ## Deploying
