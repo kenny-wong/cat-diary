@@ -37,7 +37,8 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 ## Comments and notifications
 
 - **Comment, reply and react with emoji** on shared pages. New comments appear by themselves, like a chat.
-- The 🔔 **bell** shows new friend requests, comments, replies and reactions.
+- **Mention a friend**: type **@** in your page or in a comment and pick a friend from the list. They get a notification. On your own page, friends are told once the page is shared with friends.
+- The 🔔 **bell** shows new friend requests, mentions, comments, replies and reactions.
 - **Phone and computer notifications**: in the 🔔 panel, tap **Turn on notifications on this device**. They arrive even when the diary is closed. On iPhone or iPad, first use **Add to Home Screen**.
 
 ## Privacy

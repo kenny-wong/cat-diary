@@ -392,7 +392,9 @@
     try {
       for (const id of ids) {
         const entry = state.entries.find(e => e.id === id);
-        if (entry) await Api.put(`/api/entries/${id}`, entry);
+        if (!entry) continue;
+        const res = await Api.put(`/api/entries/${id}`, entry);
+        if (res?.mentioned?.length) toast(`🏷️ ${andList(res.mentioned)} will get a notification.`);
       }
       if (prefs) await Api.put('/api/prefs', prefsBody());
       if (!saveTimer && !dirty.size) setStatus('saved');
@@ -1373,7 +1375,7 @@
       `<span class="date-week">${d.toLocaleDateString(undefined, { weekday: 'long' })}</span></span></div>` +
       `${tag(MOODS, entry.mood)}${tag(WEATHERS, entry.weather)}${entry.sports.map(v => tag(SPORTS, v)).join('')}${entry.activities.map(v => tag(ACTIVITIES, v)).join('')}</div>` +
       `<h2 class="entry-title">${escape(entry.title || 'Untitled page')}</h2>` +
-      `<div class="entry-body">${escape(entry.body)}</div>` +
+      `<div class="entry-body">${mentionHtml(entry.body)}</div>` +
       `<div class="sticker-layer">${stickers}</div></article></div>`;
   }
 
@@ -1718,7 +1720,7 @@
     }).join('');
     const one = c => `<div class="comment${c.mine ? ' mine' : ''}" data-id="${escape(c.id)}" data-name="${escape(c.authorName)}">` +
       `<div class="c-head"><strong>${escape(c.authorName)}</strong><time datetime="${escape(c.createdAt)}">${ago(c.createdAt)}</time></div>` +
-      `<div class="c-body">${escape(c.body)}</div>` +
+      `<div class="c-body">${mentionHtml(c.body)}</div>` +
       '<div class="c-actions"><button type="button" class="link-btn" data-reply>Reply</button>' +
       `${c.canDelete ? '<button type="button" class="link-btn" data-del>Delete</button>' : ''}</div></div>`;
     const n = d.comments.length;
@@ -1835,8 +1837,9 @@
     const send = form.querySelector('button');
     send.disabled = true;
     try {
-      await Api.post('/api/comments', { owner: section.dataset.owner, entry: section.dataset.entry, body, parentId: form.dataset.parent || undefined });
+      const res = await Api.post('/api/comments', { owner: section.dataset.owner, entry: section.dataset.entry, body, parentId: form.dataset.parent || undefined });
       text.value = ''; // sent, so not a draft to keep
+      if (res?.notSeen?.length) toast(`${andList(res.notSeen)} can't see this page, so ${res.notSeen.length === 1 ? "wasn't" : "weren't"} told.`);
       await loadTalk(section);
     } catch (err) {
       toast(err.message);
@@ -1848,20 +1851,175 @@
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.closest('.c-form')) e.target.closest('.c-form').requestSubmit();
   });
 
+  // ---------- @mentions ----------
+  // Typing "@" in a page or a comment suggests friends, and picking one writes "@Name ". When the comment
+  // is sent, or the page saved while shared, the server finds the names again and tells those friends.
+  const MENTION_FIELDS = '#bodyInput, .c-form textarea';
+  const WORD_CHAR = /[\p{L}\p{N}_]/u;
+  const andList = a => (a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
+
+  // Where the text mentions any of these names, as [start, end] pairs. Longest names first, as on the server.
+  function mentionSpans(text, names) {
+    const lower = text.toLowerCase();
+    const spans = [];
+    for (const name of [...new Set(names.filter(Boolean))].sort((a, b) => b.length - a.length)) {
+      const needle = `@${name.toLowerCase()}`;
+      for (let i = lower.indexOf(needle); i !== -1; i = lower.indexOf(needle, i + 1)) {
+        const end = i + needle.length;
+        if (WORD_CHAR.test(lower[i - 1] || '') || WORD_CHAR.test(lower[end] || '') || spans.some(([s, e]) => i < e && end > s)) continue;
+        spans.push([i, end]);
+      }
+    }
+    return spans.sort((a, b) => a[0] - b[0]);
+  }
+  // Escaped text with the mentions of people you know highlighted.
+  function mentionHtml(text) {
+    let html = '';
+    let at = 0;
+    for (const [s, e] of mentionSpans(text, [user.name, ...friendsData.friends.map(f => f.name)])) {
+      html += `${escape(text.slice(at, s))}<span class="mention">${escape(text.slice(s, e))}</span>`;
+      at = e;
+    }
+    return html + escape(text.slice(at));
+  }
+
+  const mentionPop = document.createElement('div');
+  mentionPop.className = 'mention-pop';
+  mentionPop.hidden = true;
+  mentionPop.setAttribute('role', 'listbox');
+  mentionPop.setAttribute('aria-label', 'Mention a friend');
+  document.body.append(mentionPop);
+  let mention = null; // { field, at, items, sel }
+
+  // The "@..." being typed just before the cursor, if any (not part of an email address).
+  function mentionQuery(field) {
+    if (field.selectionStart !== field.selectionEnd) return null;
+    const upto = field.value.slice(0, field.selectionStart);
+    const at = upto.lastIndexOf('@');
+    if (at < 0 || WORD_CHAR.test(upto[at - 1] || '')) return null;
+    const q = upto.slice(at + 1).toLowerCase();
+    return q.length > 40 || /[\n@]/.test(q) || /^\s/.test(q) ? null : { at, q };
+  }
+
+  function updateMention(field) {
+    const found = mentionQuery(field);
+    if (!found) return closeMention();
+    const { q } = found;
+    const items = friendsData.friends.filter(f => f.name &&
+      (f.name.toLowerCase().startsWith(q) || f.name.toLowerCase().split(/\s+/).some(w => w.startsWith(q)))).slice(0, 6);
+    // Nothing matches, or a whole name was just written: no list. With no friends yet, "@" says how to get some.
+    if (!items.length && (friendsData.friends.length || q)) return closeMention();
+    if (/\s$/.test(q) && items.some(f => f.name.toLowerCase() === q.trim())) return closeMention();
+    mention = { field, at: found.at, items, sel: 0 };
+    drawMention();
+  }
+
+  function drawMention() {
+    const { field, items, sel } = mention;
+    mentionPop.innerHTML = (items.length
+      ? items.map((f, i) => `<button type="button" role="option" data-i="${i}" class="${i === sel ? 'on' : ''}" aria-selected="${i === sel}">` +
+        `<span class="m-face" aria-hidden="true">${escape([...f.name][0])}</span><span class="m-name">${escape(f.name)}</span>` +
+        `${f.best ? '<span class="m-best" aria-hidden="true">⭐</span>' : ''}</button>`).join('')
+      : '<p class="m-note">Add friends in 👫 Friends to mention them.</p>') +
+      (field === els.body && items.length && !current().shared ? '<p class="m-note">🔒 This page is private: friends are told once you share it.</p>' : '');
+    mentionPop.hidden = false;
+    placeMention();
+  }
+
+  // Under the cursor (or above it when there's no room below), found with an invisible copy of the field.
+  function placeMention() {
+    const { field } = mention;
+    if (!field.isConnected) return closeMention();
+    const cs = getComputedStyle(field);
+    const copy = document.createElement('div');
+    for (const p of ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth',
+      'borderBottomWidth', 'borderLeftWidth', 'borderStyle', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight',
+      'textTransform', 'wordSpacing', 'textIndent', 'tabSize', 'overflowWrap', 'wordBreak']) copy.style[p] = cs[p];
+    Object.assign(copy.style, { position: 'absolute', top: '0', left: '-9999px', visibility: 'hidden', whiteSpace: 'pre-wrap' });
+    copy.textContent = field.value.slice(0, mention.at);
+    const mark = document.createElement('span');
+    mark.textContent = '@';
+    copy.append(mark);
+    document.body.append(copy);
+    const box = field.getBoundingClientRect();
+    const x = box.left + mark.offsetLeft - field.scrollLeft;
+    const y = box.top + mark.offsetTop - field.scrollTop;
+    const lineH = mark.offsetHeight;
+    copy.remove();
+    const w = mentionPop.offsetWidth;
+    const h = mentionPop.offsetHeight;
+    const bottom = (window.visualViewport?.height || window.innerHeight) - 8;
+    const top = y + lineH + 4 + h > bottom && y - h - 4 > 8 ? y - h - 4 : y + lineH + 4;
+    mentionPop.style.left = `${Math.max(8, Math.min(x, window.innerWidth - w - 8))}px`;
+    mentionPop.style.top = `${top}px`;
+  }
+
+  function closeMention() {
+    mention = null;
+    mentionPop.hidden = true;
+  }
+
+  function pickMention(f) {
+    const { field, at } = mention;
+    field.focus();
+    field.setRangeText(`@${f.name} `, at, field.selectionStart, 'end');
+    closeMention();
+    field.dispatchEvent(new Event('input', { bubbles: true })); // saves the page, like typing would
+  }
+
+  document.addEventListener('input', e => { if (e.target.matches?.(MENTION_FIELDS)) updateMention(e.target); });
+  document.addEventListener('click', e => {
+    if (e.target.matches?.(MENTION_FIELDS)) updateMention(e.target);
+    else if (!mentionPop.contains(e.target)) closeMention();
+  });
+  document.addEventListener('focusout', e => {
+    const field = e.target;
+    if (mention?.field === field) setTimeout(() => { if (mention?.field === field && document.activeElement !== field) closeMention(); }, 200);
+  });
+  // Arrows choose, Enter or Tab picks, Escape closes; ahead of the diary's other keys.
+  document.addEventListener('keydown', e => {
+    if (!mention || e.target !== mention.field) return;
+    const n = mention.items.length;
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
+      mention.sel = (mention.sel + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      drawMention();
+    } else if (((e.key === 'Enter' && !e.ctrlKey && !e.metaKey) || e.key === 'Tab') && n) {
+      pickMention(mention.items[mention.sel]);
+    } else if (e.key === 'Escape') {
+      closeMention();
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+  mentionPop.addEventListener('mousedown', e => e.preventDefault()); // keep typing where it was
+  mentionPop.addEventListener('click', e => {
+    const b = e.target.closest('[data-i]');
+    if (b && mention) pickMention(mention.items[+b.dataset.i]);
+  });
+  window.addEventListener('scroll', () => { if (mention) placeMention(); }, true);
+  window.addEventListener('resize', () => { if (mention) placeMention(); });
+  window.visualViewport?.addEventListener('resize', () => { if (mention) placeMention(); });
+
   // ---------- Notifications ----------
   let notes = { unread: 0, items: [] };
   let notesLoadedAt = 0;
   const seenNotes = new Set();
 
-  const pageName = n => (n.title ? `“${n.title}”` : 'a page');
+  const pageName = n => (n.title ? ` “${n.title}”` : ''); // follows the word "page"
   const FRIEND_NOTES = ['friend_request', 'friend_accept'];
-  const NOTE_ICONS = { comment: '💬', reply: '↩️', friend_request: '👋', friend_accept: '🤝' };
+  const NOTE_ICONS = { comment: '💬', reply: '↩️', mention: '📣', tag: '🏷️', friend_request: '👋', friend_accept: '🤝' };
   function noteText(n) {
     if (n.kind === 'friend_request') return `${n.actorName} sent you a friend request`;
     if (n.kind === 'friend_accept') return `${n.actorName} accepted your friend request. You're friends now!`;
-    if (n.kind === 'reply') return `${n.actorName} replied to your comment on ${n.owner === user.id ? 'your' : `${n.ownerName}'s`} page ${pageName(n)}`;
-    if (n.kind === 'reaction') return `${n.actorName} reacted ${n.emoji} to your page ${pageName(n)}`;
-    return `${n.actorName} commented on your page ${pageName(n)}`;
+    if (n.kind === 'reply') return `${n.actorName} replied to your comment on ${n.owner === user.id ? 'your' : `${n.ownerName}'s`} page${pageName(n)}`;
+    if (n.kind === 'tag') return `${n.actorName} mentioned you on their page${pageName(n)}`;
+    if (n.kind === 'mention') {
+      return `${n.actorName} mentioned you in a comment on ${n.owner === user.id ? 'your' : n.owner === n.actor ? 'their' : `${n.ownerName}'s`} page${pageName(n)}`;
+    }
+    if (n.kind === 'reaction') return `${n.actorName} reacted ${n.emoji} to your page${pageName(n)}`;
+    return `${n.actorName} commented on your page${pageName(n)}`;
   }
 
   function showUnread() {
@@ -1894,7 +2052,7 @@
         `<span class="note-main"><span>${escape(noteText(n))}</span>` +
         `${n.comment ? `<span class="note-quote">${escape(n.comment.length > 120 ? `${n.comment.slice(0, 120)}…` : n.comment)}</span>` : ''}` +
         `<time>${ago(n.createdAt)}</time></span></button>`).join('')
-      : '<p class="note-empty">Nothing yet. Friend requests, and comments or reactions on your pages, show up here.</p>';
+      : '<p class="note-empty">Nothing yet. Friend requests, mentions, and comments or reactions on your pages show up here.</p>';
   }
 
   // Open a notification by id (from a tapped phone notification), marking it read.
@@ -1919,7 +2077,8 @@
     }
     const friend = friendsData.friends.find(f => f.id === n.owner);
     if (!friend) return toast(`You're no longer friends with ${n.ownerName}.`);
-    if (await openFriend(friend, n.entryId)) revealTalk(els.friendView.querySelector('.talk'));
+    // Mentioned on a page: the page itself is the point; anything else is about its comments.
+    if (await openFriend(friend, n.entryId) && n.kind !== 'tag') revealTalk(els.friendView.querySelector('.talk'));
   }
 
   function revealTalk(section) {

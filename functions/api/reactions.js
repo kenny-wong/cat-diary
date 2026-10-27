@@ -31,7 +31,7 @@ export async function onRequestPost(context) {
         .bind(noteId, b.owner, me, b.owner, b.entry, b.emoji, isoAt()));
     }
     await db.batch(steps);
-    if (b.owner !== me) pushNote(context, b.owner, noteId, `${data.user.name} reacted ${b.emoji} to your page ${pageLabel(page.title)}`);
+    if (b.owner !== me) pushNote(context, b.owner, noteId, `${data.user.name} reacted ${b.emoji} to your page${pageLabel(page.title)}`);
     return json({ on: true });
   } catch (err) {
     return serverError(err, 'reaction');

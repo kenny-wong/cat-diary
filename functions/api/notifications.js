@@ -11,7 +11,7 @@ export async function onRequestGet({ env, data }) {
     const [items, unread] = await env.DB.batch([
       // A page's title is only shown while you can still see the page.
       env.DB.prepare(
-        `SELECT n.id, n.kind, n.entry_owner, n.entry_id, n.emoji, n.read, n.created_at, u.name AS actor_name, c.body AS comment_body,
+        `SELECT n.id, n.kind, n.actor_id, n.entry_owner, n.entry_id, n.emoji, n.read, n.created_at, u.name AS actor_name, c.body AS comment_body,
            CASE WHEN e.user_id = ?1 OR e.shared = 1 THEN json_extract(e.data, '$.title') END AS title,
            owner.name AS owner_name
          FROM notifications n
@@ -25,7 +25,7 @@ export async function onRequestGet({ env, data }) {
     return json({
       unread: unread.results[0].n,
       items: items.results.map(n => ({
-        id: n.id, kind: n.kind, owner: n.entry_owner, ownerName: n.owner_name, entryId: n.entry_id, emoji: n.emoji,
+        id: n.id, kind: n.kind, actor: n.actor_id, owner: n.entry_owner, ownerName: n.owner_name, entryId: n.entry_id, emoji: n.emoji,
         read: n.read === 1, createdAt: n.created_at, actorName: n.actor_name, comment: n.comment_body, title: n.title,
       })),
     });

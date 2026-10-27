@@ -3,8 +3,10 @@ import { newId } from '../../../lib/crypto.js';
 import { isId } from '../../../lib/validate.js';
 import { MAX_COMMENTS_PER_MINUTE, cleanComment, commentRecipients, visiblePage } from '../../../lib/talk.js';
 import { pageLabel, pushNote, snippet } from '../../../lib/push.js';
+import { findMentions, mentionable } from '../../../lib/mentions.js';
 
 // Comment on a page, or reply to a comment: { owner, entry, body, parentId? }
+// Friends mentioned as "@Name" are told too, if they can see the page; the answer lists those who can't (notSeen).
 export async function onRequestPost(context) {
   const { request, env, data } = context;
   if (!data.user) return unauthorized();
@@ -33,16 +35,28 @@ export async function onRequestPost(context) {
         .bind(id, b.owner, b.entry, me, parent ? (parent.parent_id || parent.id) : null, body, isoAt()),
     ];
     const notes = [...commentRecipients({ me, owner: b.owner, parentAuthor: parent?.author_id })].map(([userId, kind]) => ({ userId, kind, noteId: newId() }));
+    // Someone already told about this comment (as the page owner, or the one replied to) isn't told twice.
+    const people = body.includes('@') ? await mentionable(db, me) : [];
+    const notSeen = [];
+    for (const id of findMentions(body, people)) {
+      if (notes.some(n => n.userId === id)) continue;
+      if (await visiblePage(db, id, b.owner, b.entry)) notes.push({ userId: id, kind: 'mention', noteId: newId() });
+      else notSeen.push(people.find(p => p.id === id).name);
+    }
     for (const n of notes) {
       steps.push(db.prepare('INSERT INTO notifications (id, user_id, actor_id, kind, entry_owner, entry_id, comment_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .bind(n.noteId, n.userId, me, n.kind, b.owner, b.entry, id, isoAt()));
     }
     await db.batch(steps);
+    const ownerName = people.find(p => p.id === b.owner)?.name;
     for (const n of notes) {
-      const what = n.kind === 'reply' ? 'replied to your comment' : `commented on your page ${pageLabel(page.title)}`;
+      const whose = n.userId === b.owner ? 'your' : b.owner === me ? 'their' : `${ownerName || 'a friend'}'s`;
+      const what = n.kind === 'reply' ? 'replied to your comment'
+        : n.kind === 'mention' ? `mentioned you in a comment on ${whose} page${pageLabel(page.title)}`
+          : `commented on your page${pageLabel(page.title)}`;
       pushNote(context, n.userId, n.noteId, `${data.user.name} ${what}: ${snippet(body)}`);
     }
-    return json({ id }, 201);
+    return json({ id, notSeen }, 201);
   } catch (err) {
     return serverError(err, 'comment');
   }

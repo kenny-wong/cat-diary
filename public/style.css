@@ -837,6 +837,52 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .toast[hidden] { display: none; }
 
+/* ---------- @mentions ---------- */
+.mention { color: var(--accent); font-weight: 600; }
+.mention-pop {
+  position: fixed;
+  z-index: 70;
+  display: grid;
+  width: max-content;
+  min-width: 200px;
+  max-width: min(300px, calc(100vw - 16px));
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, .35);
+  font-family: var(--font-ui);
+}
+.mention-pop[hidden] { display: none; }
+.mention-pop button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.mention-pop button.on, .mention-pop button:hover { background: var(--accent-soft); }
+.m-face {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.m-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-best { margin-left: auto; font-family: var(--font-emoji); }
+.m-note { margin: 4px 8px; color: var(--muted); font-size: 13px; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
   .layout { grid-template-columns: 250px minmax(0, 1fr); }
