@@ -8,7 +8,7 @@ Live at **https://my-little-diary.pages.dev**
 
 - **Accounts**: "Continue with Google" is the only way in. A first sign-in creates the diary, named after the Google account; change the name any time in the account menu (friends see it).
 - **Friends**: add friends by their Google email, accept or decline requests, remove friends. Each page has a 🔒 Private / 👫 Friends switch, and a setting chooses which one new pages start with.
-- **Best friend**: mark one friend with ⭐ and their page for the same day shows side by side with yours.
+- **Best friends**: mark up to 4 friends with ⭐ (the Friends panel shows the count, e.g. 1/4). Their pages for the same day show next to yours (your page on the left, or on top on narrow screens); with 2–4 best friends, tabs switch between them.
 - **Read a friend's diary**: browse a friend's calendar, seeing only the pages they share with friends.
 - **Comments & reactions**: comment on shared pages, reply to comments, and react with emoji. You can delete your own comments, and any comment on your own pages.
 - **Notifications**: 🔔 bell with an unread badge for comments, replies and reactions (checked every minute while the diary is open, with optional pop-up alerts while the tab is in the background).

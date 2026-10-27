@@ -352,7 +352,7 @@
     friendsBtn: $('friendsBtn'), friendsBadge: $('friendsBadge'), friendsDialog: $('friendsDialog'),
     friendSections: $('friendSections'), addFriendForm: $('addFriendForm'), friendEmail: $('friendEmail'),
     addFriendMsg: $('addFriendMsg'), shareDefaultSeg: $('shareDefaultSeg'),
-    myTalk: $('myTalk'), notifBtn: $('notifBtn'), notifBadge: $('notifBadge'), notifPop: $('notifPop'),
+    myTalk: $('myTalk'), duoMine: document.querySelector('.duo-mine'), notifBtn: $('notifBtn'), notifBadge: $('notifBadge'), notifPop: $('notifPop'),
     notifList: $('notifList'), notifAlerts: $('notifAlerts'),
   };
 
@@ -1371,26 +1371,59 @@
 
   let friendsData = { friends: [], incoming: [], outgoing: [] };
   let friendsLoadedAt = 0;
-  let best = null; // { friend, entries }: the best friend's shared pages, shown next to yours
+  // Best friends (up to MAX_BEST): their pages for the same day sit next to yours, one friend at a time,
+  // with tabs to switch when there are several. Which tab is open is remembered on this device.
+  const MAX_BEST = 4;
+  const BEST_TAB_KEY = 'littleDiary:bestTab:v1';
+  let bests = []; // [{ friend, entries }]
+  let bestTab = local.get(BEST_TAB_KEY);
+  const activeBest = () => bests.find(b => b.friend.id === bestTab) || bests[0];
+  const nameOf = f => f.name || f.email;
 
-  // Your best friend's shared page(s) for the same day as the page you're on.
   function renderBest() {
-    const show = !!best && !view;
+    const show = bests.length > 0 && !view;
     els.bestPane.hidden = !show;
     els.layout.classList.toggle('with-best', show);
-    if (!show) return;
+    if (!show) return alignDuo();
+    const b = activeBest();
     const date = current().date;
-    const name = escape(best.friend.name || best.friend.email);
-    const onDay = best.entries.filter(e => e.date === date).sort((a, b) => a.createdAt - b.createdAt);
-    els.bestPane.innerHTML =
+    const name = escape(nameOf(b.friend));
+    const onDay = b.entries.filter(e => e.date === date).sort((x, y) => x.createdAt - y.createdAt);
+    const tabs = bests.length > 1
+      ? '<div class="best-tabs" role="tablist" aria-label="Best friends">' + bests.map(x =>
+        `<button type="button" role="tab" class="best-tab${x === b ? ' active' : ''}" aria-selected="${x === b}" data-best-tab="${escape(x.friend.id)}">` +
+        `${escape(nameOf(x.friend))}${x.entries.some(e => e.date === date) ? '<span class="best-dot" title="Shared a page this day"></span>' : ''}</button>`).join('') + '</div>'
+      : '';
+    els.bestPane.innerHTML = tabs +
       `<div class="best-head"><span>⭐ ${name}'s page</span><button class="link-btn" type="button" data-read-best>Read all of ${name}'s diary</button></div>` +
       (onDay.length
-        ? onDay.map(e => readonlyPageHtml(e, best.friend.id) + talkShell(best.friend.id, e.id)).join('')
+        ? onDay.map(e => readonlyPageHtml(e, b.friend.id) + talkShell(b.friend.id, e.id)).join('')
         : `<div class="best-empty">${name} hasn't shared a page for ${parseDate(date).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}.</div>`);
     els.bestPane.querySelectorAll('.talk').forEach(loadTalk);
+    alignDuo();
   }
+
+  // Side by side, start your page level with your friend's page (below the tabs and name).
+  function alignDuo() {
+    els.duoMine.style.paddingTop = '';
+    if (els.bestPane.hidden) return;
+    const head = els.bestPane.querySelector('.best-head');
+    const sideBySide = Math.abs(els.bestPane.offsetTop - els.duoMine.offsetTop) < 5;
+    if (sideBySide && head) els.duoMine.style.paddingTop = `${head.offsetTop + head.offsetHeight - els.bestPane.offsetTop}px`;
+  }
+  window.addEventListener('resize', alignDuo);
+  document.fonts?.ready.then(alignDuo); // web fonts can change the height of the tabs and name
+
   els.bestPane.addEventListener('click', e => {
-    if (e.target.closest('[data-read-best]')) openFriend(best.friend);
+    const tab = e.target.closest('[data-best-tab]');
+    if (tab) {
+      bestTab = tab.dataset.bestTab;
+      local.set(BEST_TAB_KEY, bestTab);
+      renderBest();
+      els.bestPane.querySelector('.best-tab.active')?.focus();
+    } else if (e.target.closest('[data-read-best]')) {
+      openFriend(activeBest().friend);
+    }
   });
 
   async function loadFriends() {
@@ -1405,14 +1438,14 @@
     els.friendsBadge.hidden = !n;
     els.friendsBtn.title = n ? `${n} friend request${n === 1 ? '' : 's'} waiting` : 'Friends';
     if (els.friendsDialog.open) renderFriendSections();
-    const bestFriend = friendsData.friends.find(f => f.best);
-    try {
-      best = bestFriend
-        ? { friend: bestFriend, entries: (await Api.get(`/api/friends/${bestFriend.id}/diary`)).entries.map(sanitizeEntry).filter(Boolean) }
-        : null;
-    } catch {
-      best = null;
-    }
+    const loaded = await Promise.all(friendsData.friends.filter(f => f.best).slice(0, MAX_BEST).map(async friend => {
+      try {
+        return { friend, entries: (await Api.get(`/api/friends/${friend.id}/diary`)).entries.map(sanitizeEntry).filter(Boolean) };
+      } catch {
+        return null;
+      }
+    }));
+    bests = loaded.filter(Boolean);
     renderBest();
   }
 
@@ -1477,10 +1510,12 @@
         `<button class="btn primary" type="button" data-accept="${escape(r.id)}">Accept</button>` +
         `<button class="btn" type="button" data-decline="${escape(r.id)}">Decline</button></span></div>`).join('');
     }
-    html += '<h3>Your friends</h3>' + (friends.length
+    const bestCount = friends.filter(f => f.best).length;
+    const full = bestCount >= MAX_BEST;
+    html += `<h3>Your friends <span class="best-count" title="Best friends marked">(⭐ ${bestCount}/${MAX_BEST})</span></h3>` + (friends.length
       ? friends.map(f => `<div class="fr-row">${person(f)}<span class="fr-actions">` +
-        `<button class="star-btn${f.best ? ' on' : ''}" type="button" data-best="${escape(f.id)}" aria-pressed="${f.best}" ` +
-        `title="${f.best ? 'Best friend: their page shows next to yours. Tap to unmark.' : 'Make best friend'}">${f.best ? '⭐' : '☆'}</button>` +
+        `<button class="star-btn${f.best ? ' on' : ''}" type="button" data-best="${escape(f.id)}" aria-pressed="${f.best}"${!f.best && full ? ' disabled' : ''} ` +
+        `title="${f.best ? 'Best friend: their page shows next to yours. Tap to unmark.' : full ? `You already have ${MAX_BEST} best friends` : 'Make best friend'}">${f.best ? '⭐' : '☆'}</button>` +
         `<button class="btn" type="button" data-read="${escape(f.id)}">View diary</button>` +
         `<button class="link-btn" type="button" data-unfriend="${escape(f.id)}">Remove</button></span></div>`).join('')
       : '<p class="fr-empty">No friends yet. Add one above!</p>');
@@ -1488,7 +1523,7 @@
       html += '<h3>Waiting for them to accept</h3>' + outgoing.map(r => `<div class="fr-row">${person(r)}<span class="fr-actions">` +
         `<button class="link-btn" type="button" data-cancel="${escape(r.id)}">Cancel</button></span></div>`).join('');
     }
-    html += '<p class="fr-note">⭐ Your best friend\'s page for the same day shows next to yours. ' +
+    html += `<p class="fr-note">⭐ Mark up to ${MAX_BEST} best friends: their pages for the same day show next to yours (with tabs when there are several). ` +
       'Friends only ever see pages you switch to 👫 Friends.</p>';
     els.friendSections.innerHTML = html;
   }
@@ -1543,7 +1578,11 @@
       } else if (d.best) {
         const f = friend(d.best);
         await Api.put(`/api/friends/${f.id}`, { best: !f.best });
-        toast(f.best ? `${f.name} is no longer your best friend.` : `⭐ ${f.name} is your best friend: their page shows next to yours.`);
+        if (!f.best) {
+          bestTab = f.id; // show the newly marked friend
+          local.set(BEST_TAB_KEY, bestTab);
+        }
+        toast(f.best ? `${f.name} is no longer a best friend.` : `⭐ ${f.name} is now a best friend: their page shows next to yours.`);
       } else if (d.unfriend) {
         const f = friend(d.unfriend);
         if (!confirm(`Remove ${f.name} from your friends?\nYou'll both stop seeing each other's shared pages.`)) return;
