@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_MENTIONS, findMentions } from '../lib/mentions.js';
+import { MAX_MENTIONS, findMentions, scanMentions } from '../lib/mentions.js';
 
 const people = [{ id: 'k', name: 'Kenny Wong' }, { id: 'uk', name: 'Kenny Wong UK' }, { id: 'c', name: 'Chloe' }, { id: 'n', name: '' }];
 
 test('finds whole @names in any case', () => {
   assert.deepEqual(findMentions('Played with @chloe today!', people), ['c']);
-  assert.deepEqual(findMentions('@Chloe and @Kenny Wong', people), ['k', 'c']);
+  assert.deepEqual(findMentions('@Chloe and @Kenny Wong', people), ['c', 'k']); // in the order written
   assert.deepEqual(findMentions('no mentions here', people), []);
   assert.deepEqual(findMentions(null, people), []);
 });
@@ -31,4 +31,25 @@ test('someone mentioned twice counts once; no more than the cap', () => {
 test('an email address is not a mention of its domain', () => {
   assert.deepEqual(findMentions('mail me at kenny@Chloe', people), []);
   assert.deepEqual(findMentions('mail kenny@Chloe, thanks @Chloe', people), ['c']);
+});
+
+const friends = [{ id: 'c', name: 'Chloe Wong' }, { id: 'uk', name: 'Kenny Wong UK' }, { id: 'k2', name: 'Kenny Lee' }];
+
+test('a first name is enough when only one friend has it', () => {
+  assert.deepEqual(findMentions('@Hayley, @Chloe\nTrain', friends), ['c']);
+  assert.deepEqual(findMentions('thanks @chloe!', friends), ['c']);
+  assert.deepEqual(findMentions('@Chloe Wong and @Chloe', friends), ['c']);
+});
+
+test('names nobody has, and first names several friends share, are reported', () => {
+  const r = scanMentions('@Hayley go to Volleyball with @Kenny and @Kenny Lee, at 3@pm, mail a@b.com, @9am', friends);
+  assert.deepEqual(r.ids, ['k2']);
+  assert.deepEqual(r.unknown, ['Hayley']);
+  assert.deepEqual(r.unclear, ['Kenny']);
+});
+
+test('spans point at the mention in the text', () => {
+  const text = 'Hi @Chloe and @Kenny Wong UK!';
+  const r = scanMentions(text, friends);
+  assert.deepEqual(r.spans.map(({ s, e }) => text.slice(s, e)), ['@Chloe', '@Kenny Wong UK']);
 });

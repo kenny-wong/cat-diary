@@ -374,7 +374,7 @@
     photoBtn: $('photoBtn'), photoInput: $('photoInput'),
     trayTabs: $('trayTabs'), trayGrid: $('trayGrid'), tray: $('tray'), fab: $('stickerFab'), trayClose: $('trayClose'),
     sidebar: $('sidebar'), scrim: $('scrim'), menuBtn: $('menuBtn'),
-    saveStatus: $('saveStatus'), wordCount: $('wordCount'), editedAt: $('editedAt'), toast: $('toast'),
+    saveStatus: $('saveStatus'), wordCount: $('wordCount'), editedAt: $('editedAt'), taggedInfo: $('taggedInfo'), toast: $('toast'),
     shareBtn: $('shareBtn'), layout: document.querySelector('.layout'), bestPane: $('bestPane'),
     friendView: $('friendView'), viewingBar: $('viewingBar'), viewingName: $('viewingName'),
     friendsBtn: $('friendsBtn'), friendsBadge: $('friendsBadge'), friendsDialog: $('friendsDialog'),
@@ -436,7 +436,10 @@
     if (entry) {
       entry.updatedAt = Date.now();
       dirty.add(entry.id);
-      if (entry === current()) els.editedAt.textContent = editedText(entry);
+      if (entry === current()) {
+        els.editedAt.textContent = editedText(entry);
+        showTagged();
+      }
     }
     setStatus('saving');
     schedule(600);
@@ -469,7 +472,7 @@
     els.toast.textContent = msg;
     els.toast.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { els.toast.hidden = true; }, 2800);
+    toastTimer = setTimeout(() => { els.toast.hidden = true; }, Math.max(2800, msg.length * 60)); // long ones stay longer
   }
 
   // ---------- Rendering ----------
@@ -552,6 +555,7 @@
     renderStickers();
     updateWordCount(entry);
     els.editedAt.textContent = editedText(entry);
+    showTagged();
     renderBest();
     els.myTalk.dataset.owner = user.id;
     els.myTalk.dataset.entry = entry.id;
@@ -1597,6 +1601,7 @@
     els.friendsBadge.hidden = !n;
     if (els.friendsDialog.open) renderFriendSections();
     showPresence();
+    showTagged();
   }
   // Every 20 seconds while the Friends panel is open, otherwise every minute.
   setInterval(() => { if (els.friendsDialog.open) refreshFriendList(); }, 20000);
@@ -1609,6 +1614,7 @@
     } catch {
       return;
     }
+    showTagged();
     const n = friendsData.incoming.length;
     els.friendsBadge.textContent = n;
     els.friendsBadge.hidden = !n;
@@ -1946,7 +1952,9 @@
     try {
       const res = await Api.post('/api/comments', { owner: section.dataset.owner, entry: section.dataset.entry, body, parentId: form.dataset.parent || undefined });
       text.value = ''; // sent, so not a draft to keep
-      if (res?.notSeen?.length) toast(`${andList(res.notSeen)} can't see this page, so ${res.notSeen.length === 1 ? "wasn't" : "weren't"} told.`);
+      const missed = notTold(scanMentions(body, friendsData.friends));
+      if (res?.notSeen?.length) missed.unshift(`${andList(res.notSeen)} can't see this page, so ${res.notSeen.length === 1 ? "wasn't" : "weren't"} told`);
+      if (missed.length) toast(`${missed.join('. ')}.`);
       await loadTalk(section);
     } catch (err) {
       toast(err.message);
@@ -1965,29 +1973,75 @@
   const WORD_CHAR = /[\p{L}\p{N}_]/u;
   const andList = a => (a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
 
-  // Where the text mentions any of these names, as [start, end] pairs. Longest names first, as on the server.
-  function mentionSpans(text, names) {
+  // Same rules as lib/mentions.js `scanMentions` (keep the two in step): "@Full Name" (longest first), or
+  // "@First" when only one of the people has that first name; never inside a word. Returns
+  // { ids, spans: [{ s, e, id }], unknown: words nobody has, unclear: first names several people share }.
+  function scanMentions(text, people) {
+    const out = { ids: [], spans: [], unknown: [], unclear: [] };
+    if (!text.includes('@')) return out;
     const lower = text.toLowerCase();
-    const spans = [];
-    for (const name of [...new Set(names.filter(Boolean))].sort((a, b) => b.length - a.length)) {
-      const needle = `@${name.toLowerCase()}`;
+    const free = i => !WORD_CHAR.test(lower[i - 1] || '');
+    const taken = (s, e) => out.spans.some(x => s < x.e && e > x.s);
+    const named = people.filter(p => p.name);
+    for (const p of [...named].sort((a, b) => b.name.length - a.name.length)) {
+      const needle = `@${p.name.toLowerCase()}`;
       for (let i = lower.indexOf(needle); i !== -1; i = lower.indexOf(needle, i + 1)) {
-        const end = i + needle.length;
-        if (WORD_CHAR.test(lower[i - 1] || '') || WORD_CHAR.test(lower[end] || '') || spans.some(([s, e]) => i < e && end > s)) continue;
-        spans.push([i, end]);
+        const e = i + needle.length;
+        if (free(i) && !WORD_CHAR.test(lower[e] || '') && !taken(i, e)) out.spans.push({ s: i, e, id: p.id });
       }
     }
-    return spans.sort((a, b) => a[0] - b[0]);
+    const first = p => p.name.toLowerCase().split(/\s+/)[0];
+    for (const m of lower.matchAll(/@(\p{L}[\p{L}\p{N}_]*)/gu)) {
+      const s = m.index;
+      const e = s + m[0].length;
+      if (!free(s) || taken(s, e)) continue;
+      const same = named.filter(p => first(p) === m[1]);
+      const list = same.length ? out.unclear : out.unknown;
+      if (same.length === 1) out.spans.push({ s, e, id: same[0].id });
+      else if (!list.includes(text.slice(s + 1, e))) list.push(text.slice(s + 1, e));
+    }
+    out.spans.sort((a, b) => a.s - b.s);
+    for (const { id } of out.spans) if (!out.ids.includes(id)) out.ids.push(id);
+    return out;
   }
   // Escaped text with the mentions of people you know highlighted.
   function mentionHtml(text) {
     let html = '';
     let at = 0;
-    for (const [s, e] of mentionSpans(text, [user.name, ...friendsData.friends.map(f => f.name)])) {
+    for (const { s, e } of scanMentions(text, [{ id: user.id, name: user.name }, ...friendsData.friends]).spans) {
       html += `${escape(text.slice(at, s))}<span class="mention">${escape(text.slice(s, e))}</span>`;
       at = e;
     }
     return html + escape(text.slice(at));
+  }
+  // Mentions that reach nobody: a name that isn't a friend's, or a first name several friends share.
+  const notTold = r => [
+    ...(r.unknown.length ? [`${andList(r.unknown.map(w => `@${w}`))} ${r.unknown.length === 1 ? "isn't one of your friends" : "aren't your friends"}`] : []),
+    ...(r.unclear.length ? [`${andList(r.unclear.map(w => `@${w}`))}: more than one friend has that name, so pick from the list`] : []),
+  ];
+  // Leaving the text box: say once per page which @names won't reach anyone (the line under the page may be off screen).
+  const warnedMentions = new Set();
+  els.body.addEventListener('change', () => {
+    const entry = current();
+    if (!friendsLoadedAt || !entry) return;
+    const r = scanMentions(`${entry.title}
+${entry.body}`, friendsData.friends);
+    const fresh = key => !warnedMentions.has(`${entry.id}|${key}`);
+    const unwarned = { unknown: r.unknown.filter(fresh), unclear: r.unclear.filter(fresh) };
+    [...unwarned.unknown, ...unwarned.unclear].forEach(w => warnedMentions.add(`${entry.id}|${w}`));
+    const missed = notTold(unwarned);
+    if (missed.length) toast(`${missed.join('. ')}.`);
+  });
+  // Under your page: whom its mentions reach (told once it's shared), and any that reach nobody.
+  function showTagged() {
+    const entry = current();
+    if (!entry || view) return;
+    const r = scanMentions(`${entry.title}\n${entry.body}`, friendsData.friends);
+    const names = r.ids.map(id => friendsData.friends.find(f => f.id === id)?.name).filter(Boolean);
+    const parts = names.length ? [`🏷️ Tagged: ${names.join(', ')}${entry.shared ? '' : ' (told when you share this page)'}`] : [];
+    if (friendsLoadedAt) parts.push(...notTold(r)); // before the friend list arrives, everyone looks unknown
+    els.taggedInfo.textContent = parts.join(' · ');
+    els.taggedInfo.hidden = !parts.length;
   }
 
   const mentionPop = document.createElement('div');
