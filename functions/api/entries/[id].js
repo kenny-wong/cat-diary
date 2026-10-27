@@ -8,9 +8,9 @@ export async function onRequestPut({ request, env, data, params }) {
   if (checked.error) return badRequest(checked.error);
   try {
     await env.DB.prepare(
-      `INSERT INTO entries (user_id, id, date, data, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (user_id, id) DO UPDATE SET date = excluded.date, data = excluded.data, updated_at = excluded.updated_at`)
-      .bind(data.user.id, params.id, checked.date, checked.data, checked.updatedAt).run();
+      `INSERT INTO entries (user_id, id, date, data, updated_at, shared) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, id) DO UPDATE SET date = excluded.date, data = excluded.data, updated_at = excluded.updated_at, shared = excluded.shared`)
+      .bind(data.user.id, params.id, checked.date, checked.data, checked.updatedAt, checked.shared).run();
     return json({ ok: true });
   } catch (err) {
     return serverError(err, 'save page');

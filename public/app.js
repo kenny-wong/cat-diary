@@ -34,7 +34,7 @@
     return { get: id => run('readonly', s => s.get(id)) };
   })();
   const isPhoto = ref => ref.startsWith('photo:');
-  const photoUrl = id => `/api/photos/${encodeURIComponent(id)}`;
+  const photoUrl = (id, owner) => `/api/photos/${encodeURIComponent(id)}${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`;
   // Photos known to be on the server, so the ones no page uses any more can be removed.
   const knownPhotos = new Set();
 
@@ -136,19 +136,20 @@
     const now = Date.now();
     return {
       id: uid(), date: todayStr(), title: '', body: '', mood: '', weather: '',
-      theme: state?.defaultTheme || 'cat', stickers: [], createdAt: now, updatedAt: now, ...extra,
+      theme: state?.defaultTheme || 'cat', stickers: [], shared: !!state?.shareNewPages, createdAt: now, updatedAt: now, ...extra,
     };
   }
 
   function welcomeEntry() {
     return newEntry({
-      theme: 'cat', mood: '🥰', weather: '☀️',
+      theme: 'cat', mood: '🥰', weather: '☀️', shared: false,
       title: 'My very first page 🐾',
       body: 'Dear diary,\n\nThis little notebook is all mine! Here is how it works:\n\n' +
         '• Pick a template above the page: Cat Café, Sakura, Seaside and more.\n' +
         '• Tap a sticker in the sticker box to stick it on the page.\n' +
         '• Drag a sticker to move it. Pull the corner dot to resize and spin it, or tap × to peel it off.\n' +
-        '• Everything saves to your account by itself, so your diary is there on any phone or computer you log in on.\n\n' +
+        '• Everything saves to your account by itself, so your diary is there on any phone or computer you log in on.\n' +
+        '• Pages are private (🔒). Tap 🔒 to let your friends read a page, and add friends with the 👫 Friends button.\n\n' +
         'Now tell me about your day ✏️',
       stickers: [
         { id: uid(), ref: 'svg:tapePaw', x: 30, y: 6, size: 150, rot: -5 },
@@ -186,6 +187,7 @@
           if (isPhoto(st.ref)) st.frame = FRAMES.includes(s.frame) ? s.frame : 'polaroid';
           return st;
         }),
+      shared: e.shared === true,
       createdAt: num(e.createdAt, Date.now()),
       updatedAt: num(e.updatedAt, Date.now()),
     };
@@ -206,6 +208,10 @@
   // ---------- Loading ----------
   const user = await Account.start();
   let state;
+  // While reading a friend's diary, the sidebar and page show `view` ({ friend, entries, currentId }) instead of `state`.
+  let view = null;
+  const book = () => view || state;
+  const shown = () => book().entries.find(e => e.id === book().currentId);
   for (;;) {
     try {
       const diary = await Api.get('/api/diary');
@@ -214,6 +220,7 @@
         currentId: local.get(LAST_PAGE_KEY),
         defaultTheme: THEMES[diary.prefs.defaultTheme] ? diary.prefs.defaultTheme : 'cat',
         view: diary.prefs.view === 'list' ? 'list' : 'calendar',
+        shareNewPages: diary.prefs.shareNewPages === true,
       };
       break;
     } catch (err) {
@@ -305,19 +312,24 @@
     trayTabs: $('trayTabs'), trayGrid: $('trayGrid'), tray: $('tray'), fab: $('stickerFab'), trayClose: $('trayClose'),
     sidebar: $('sidebar'), scrim: $('scrim'), menuBtn: $('menuBtn'),
     saveStatus: $('saveStatus'), wordCount: $('wordCount'), toast: $('toast'),
+    shareBtn: $('shareBtn'), layout: document.querySelector('.layout'), bestPane: $('bestPane'),
+    friendView: $('friendView'), viewingBar: $('viewingBar'), viewingName: $('viewingName'),
+    friendsBtn: $('friendsBtn'), friendsBadge: $('friendsBadge'), friendsDialog: $('friendsDialog'),
+    friendSections: $('friendSections'), addFriendForm: $('addFriendForm'), friendEmail: $('friendEmail'),
+    addFriendMsg: $('addFriendMsg'), shareDefaultSeg: $('shareDefaultSeg'),
   };
 
   const current = () => state.entries.find(e => e.id === state.currentId);
 
   function sortedEntries() {
-    return [...state.entries].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
+    return [...book().entries].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
   }
 
   // ---------- Saving ----------
   // Changes go to the server shortly after typing stops. Saves run one at a time, in order.
   let saveTimer = null;
   let saveChain = Promise.resolve();
-  const prefsBody = () => ({ defaultTheme: state.defaultTheme, view: state.view });
+  const prefsBody = () => ({ defaultTheme: state.defaultTheme, view: state.view, shareNewPages: state.shareNewPages });
   function setStatus(kind) {
     els.saveStatus.classList.toggle('error', kind === 'error');
     els.saveStatus.textContent = { saving: 'Saving…', saved: 'Saved ✓', error: 'Not saved yet…' }[kind] || '';
@@ -378,6 +390,8 @@
   // Phones often close a tab without beforeunload, so save as soon as it goes to the background.
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && (dirty.size || prefsDirty)) saveNow();
+    // Coming back to the tab: pick up new friend requests and the best friend's latest pages.
+    if (!document.hidden && Date.now() - friendsLoadedAt > 60000) loadFriends();
   });
 
   let toastTimer;
@@ -426,6 +440,12 @@
     els.weatherBtn.classList.toggle('set', !!entry.weather);
     els.moodPop.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === entry.mood && !!b.dataset.v));
     els.weatherPop.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === entry.weather && !!b.dataset.v));
+    els.shareBtn.innerHTML = entry.shared
+      ? '<span class="emo">👫</span><span class="label">Friends can read</span>'
+      : '<span class="emo">🔒</span><span class="label">Only me</span>';
+    els.shareBtn.classList.toggle('set', entry.shared);
+    els.shareBtn.setAttribute('aria-pressed', entry.shared);
+    els.shareBtn.title = entry.shared ? 'Your friends can read this page. Tap to make it private.' : 'Only you can read this page. Tap to share it with your friends.';
   }
 
   function autosize() {
@@ -454,6 +474,7 @@
     autosize();
     renderStickers();
     updateWordCount(entry);
+    renderBest();
   }
 
   // ---------- Sidebar: calendar, year > month folders, search ----------
@@ -463,9 +484,9 @@
   function entryItem(e, dateFormat = { weekday: 'short', month: 'short', day: 'numeric' }) {
     const t = THEMES[e.theme] || THEMES.cat;
     const snippet = e.body.replace(/\s+/g, ' ').trim().slice(0, 60);
-    return `<button class="entry-item${e.id === state.currentId ? ' active' : ''}" type="button" data-id="${e.id}">` +
+    return `<button class="entry-item${e.id === book().currentId ? ' active' : ''}" type="button" data-id="${e.id}">` +
       `<span class="ei-mood" style="background:${t.swatch}">${escape(e.mood || t.icon)}</span>` +
-      `<span class="ei-main"><span class="ei-date">${parseDate(e.date).toLocaleDateString(undefined, dateFormat)}</span>` +
+      `<span class="ei-main"><span class="ei-date">${parseDate(e.date).toLocaleDateString(undefined, dateFormat)}${e.shared && !view ? ' · 👫' : ''}</span>` +
       `<span class="ei-title">${escape(e.title || 'Untitled page')}</span>` +
       (snippet ? `<span class="ei-snippet">${escape(snippet)}</span>` : '') +
       `</span></button>`;
@@ -515,11 +536,11 @@
 
   function calendarHtml() {
     const byDate = new Map();
-    for (const e of [...state.entries].sort((a, b) => a.createdAt - b.createdAt)) {
+    for (const e of [...book().entries].sort((a, b) => a.createdAt - b.createdAt)) {
       if (!byDate.has(e.date)) byDate.set(e.date, []);
       byDate.get(e.date).push(e);
     }
-    const cur = current();
+    const cur = shown();
 
     if (cal.zoom === 'year') {
       let total = 0;
@@ -528,7 +549,7 @@
         `<button class="cal-nav" type="button" data-nav="1" aria-label="Next year">›</button></div><div class="cal-months">`;
       for (let m = 0; m < 12; m++) {
         const prefix = `${cal.y}-${pad(m + 1)}`;
-        const n = state.entries.filter(e => e.date.startsWith(prefix)).length;
+        const n = book().entries.filter(e => e.date.startsWith(prefix)).length;
         total += n;
         const name = new Date(cal.y, m, 1).toLocaleDateString(undefined, { month: 'short' });
         html += `<button class="cal-month${n ? ' has' : ''}${cur.date.startsWith(prefix) ? ' cur' : ''}" type="button" data-month="${m}">` +
@@ -562,7 +583,7 @@
       html += `<div class="side-label">${parseDate(cal.day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}` +
         `<button class="link-btn" type="button" data-clear-day>whole month</button></div>` +
         list.map(e => entryItem(e)).join('') +
-        `<button class="btn add-day" type="button" data-new-on="${cal.day}">＋ Write a page for this day</button>`;
+        (view ? '' : `<button class="btn add-day" type="button" data-new-on="${cal.day}">＋ Write a page for this day</button>`);
     } else {
       const prefix = `${cal.y}-${pad(cal.m + 1)}`;
       const list = sortedEntries().filter(e => e.date.startsWith(prefix));
@@ -797,6 +818,7 @@
         await Api.put(`/api/photos/${pid}`, blob);
         knownPhotos.add(pid);
         if (!state.entries.includes(entry)) return; // the page was torn out while the photo uploaded
+        if (view) closeFriend();
         if (current() !== entry) openEntry(entry.id);
         const offset = i++ * 24;
         addSticker(`photo:${pid}`, {
@@ -854,6 +876,7 @@
     addPhotos(e.dataTransfer.files, { x: ((e.clientX - r.left) / r.width) * 100, y: e.clientY - r.top });
   });
   document.addEventListener('paste', e => {
+    if (view) return;
     const images = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
     if (!images.length) return;
     e.preventDefault();
@@ -927,6 +950,7 @@
     els.dateInput.classList.remove('visible');
     renderMeta(entry);
     renderList();
+    renderBest();
     touch(entry);
   });
 
@@ -972,23 +996,34 @@
     touch(entry);
   });
 
+  els.shareBtn.addEventListener('click', () => {
+    const entry = current();
+    entry.shared = !entry.shared;
+    renderMeta(entry);
+    renderList();
+    touch(entry);
+    toast(entry.shared ? '👫 Your friends can now read this page.' : '🔒 This page is private again.');
+  });
+
   // ---------- Pages ----------
   // fromCalendar keeps the calendar where the user is browsing; otherwise it jumps to the page's month.
+  // Works for your own diary and, while reading one, a friend's.
   function openEntry(id, { fromCalendar = false } = {}) {
     if (saveTimer) saveNow();
-    state.currentId = id;
+    book().currentId = id;
     selectedStickerId = null;
-    const entry = current();
+    const entry = shown();
     expandFor(entry.date);
     if (!fromCalendar) {
       const d = parseDate(entry.date);
       Object.assign(cal, { y: d.getFullYear(), m: d.getMonth(), zoom: 'month', day: null });
     }
-    renderEntry();
+    if (view) renderFriendPage();
+    else renderEntry();
     renderList();
     setDrawer(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    local.set(LAST_PAGE_KEY, id);
+    if (!view) local.set(LAST_PAGE_KEY, id);
   }
 
   els.list.addEventListener('click', e => {
@@ -1011,7 +1046,7 @@
     } else if (t.dataset.date) {
       const date = t.dataset.date;
       cal.day = cal.day === date ? null : date;
-      const onDay = state.entries.filter(x => x.date === date);
+      const onDay = book().entries.filter(x => x.date === date);
       if (cal.day && onDay.length === 1) return openEntry(onDay[0].id, { fromCalendar: true });
     } else if ('clearDay' in t.dataset) {
       cal.day = null;
@@ -1068,6 +1103,245 @@
   });
 
   els.search.addEventListener('input', renderList);
+
+  // ---------- Friends ----------
+  // A friend's page, read-only. Everything in it comes from someone else, so every text is escaped
+  // and only known values (themes, moods, frames, numbers checked by sanitizeEntry) go into markup.
+  function readonlyPageHtml(entry, ownerId) {
+    const t = THEMES[entry.theme] || THEMES.cat;
+    const d = parseDate(entry.date);
+    const tag = (list, value) => {
+      const found = list.find(([emo]) => emo === value);
+      return found ? `<span class="pick-btn set"><span class="emo">${found[0]}</span><span class="label">${found[1]}</span></span>` : '';
+    };
+    const bottom = entry.stickers.reduce((max, st) => Math.max(max, st.y + st.size / 2), 0);
+    const stickers = entry.stickers.map((st, i) => {
+      const photo = isPhoto(st.ref);
+      const art = photo
+        ? `<div class="photo"><img src="${escape(photoUrl(st.ref.slice(6), ownerId))}" alt="" loading="lazy" draggable="false"></div>`
+        : Stickers.render(st.ref);
+      return `<div class="sticker${Stickers.meta(st.ref).tape ? ' is-tape' : ''}${photo ? ` is-photo frame-${st.frame}` : ''}" ` +
+        `style="left:${st.x}%;top:${st.y}px;width:${st.size}px;font-size:${st.size * 0.8}px;--rot:${st.rot}deg;z-index:${i + 1}">` +
+        `<div class="sticker-art">${art}</div></div>`;
+    }).join('');
+    return `<div class="page-wrap"><article class="page ro-page" data-theme="${entry.theme}" style="--sticker-bottom:${Math.round(bottom + 40)}px">` +
+      `<div class="page-deco" aria-hidden="true">${t.deco}</div>` +
+      `<div class="page-head"><div class="date-badge"><span class="date-day">${d.getDate()}</span><span class="date-meta">` +
+      `<span class="date-month">${d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>` +
+      `<span class="date-week">${d.toLocaleDateString(undefined, { weekday: 'long' })}</span></span></div>` +
+      `${tag(MOODS, entry.mood)}${tag(WEATHERS, entry.weather)}</div>` +
+      `<h2 class="entry-title">${escape(entry.title || 'Untitled page')}</h2>` +
+      `<div class="entry-body">${escape(entry.body)}</div>` +
+      `<div class="sticker-layer">${stickers}</div></article></div>`;
+  }
+
+  // Missing friend photos show a note instead of a broken image.
+  for (const box of [els.bestPane, els.friendView]) {
+    box.addEventListener('error', e => {
+      if (e.target.tagName !== 'IMG') return;
+      const photo = e.target.parentElement;
+      photo.classList.add('missing');
+      photo.textContent = '📷 Photo not shared';
+    }, true);
+  }
+
+  let friendsData = { friends: [], incoming: [], outgoing: [] };
+  let friendsLoadedAt = 0;
+  let best = null; // { friend, entries }: the best friend's shared pages, shown next to yours
+
+  // Your best friend's shared page(s) for the same day as the page you're on.
+  function renderBest() {
+    const show = !!best && !view;
+    els.bestPane.hidden = !show;
+    els.layout.classList.toggle('with-best', show);
+    if (!show) return;
+    const date = current().date;
+    const name = escape(best.friend.name || best.friend.email);
+    const onDay = best.entries.filter(e => e.date === date).sort((a, b) => a.createdAt - b.createdAt);
+    els.bestPane.innerHTML =
+      `<div class="best-head"><span>⭐ ${name}'s page</span><button class="link-btn" type="button" data-read-best>Read all of ${name}'s diary</button></div>` +
+      (onDay.length
+        ? onDay.map(e => readonlyPageHtml(e, best.friend.id)).join('')
+        : `<div class="best-empty">${name} hasn't shared a page for ${parseDate(date).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}.</div>`);
+  }
+  els.bestPane.addEventListener('click', e => {
+    if (e.target.closest('[data-read-best]')) openFriend(best.friend);
+  });
+
+  async function loadFriends() {
+    try {
+      friendsData = await Api.get('/api/friends');
+      friendsLoadedAt = Date.now();
+    } catch {
+      return;
+    }
+    const n = friendsData.incoming.length;
+    els.friendsBadge.textContent = n;
+    els.friendsBadge.hidden = !n;
+    els.friendsBtn.title = n ? `${n} friend request${n === 1 ? '' : 's'} waiting` : 'Friends';
+    if (els.friendsDialog.open) renderFriendSections();
+    const bestFriend = friendsData.friends.find(f => f.best);
+    try {
+      best = bestFriend
+        ? { friend: bestFriend, entries: (await Api.get(`/api/friends/${bestFriend.id}/diary`)).entries.map(sanitizeEntry).filter(Boolean) }
+        : null;
+    } catch {
+      best = null;
+    }
+    renderBest();
+  }
+
+  // ---------- Reading a friend's diary ----------
+  function renderFriendPage() {
+    const entry = shown();
+    applyTheme(entry);
+    els.friendView.innerHTML = readonlyPageHtml(entry, view.friend.id);
+  }
+
+  async function openFriend(friend) {
+    let data;
+    try {
+      data = await Api.get(`/api/friends/${friend.id}/diary`);
+    } catch (err) {
+      return toast(err.message);
+    }
+    const name = friend.name || friend.email;
+    const entries = data.entries.map(sanitizeEntry).filter(Boolean);
+    if (!entries.length) return toast(`${name} hasn't shared any pages with friends yet.`);
+    saveNow();
+    selectSticker(null);
+    setTray(false);
+    view = { friend, entries, currentId: null };
+    document.body.classList.add('viewing');
+    els.viewingName.textContent = name;
+    els.viewingBar.hidden = els.friendView.hidden = false;
+    els.search.value = '';
+    els.search.placeholder = `Search ${name}'s pages…`;
+    renderBest();
+    openEntry(sortedEntries()[0].id);
+  }
+
+  function closeFriend() {
+    if (!view) return;
+    view = null;
+    document.body.classList.remove('viewing');
+    els.viewingBar.hidden = els.friendView.hidden = true;
+    els.friendView.innerHTML = '';
+    els.search.value = '';
+    els.search.placeholder = 'Search your diary…';
+    openEntry(state.currentId);
+  }
+  $('backToMine').addEventListener('click', closeFriend);
+
+  // ---------- Friends dialog ----------
+  function renderFriendSections() {
+    const { friends, incoming, outgoing } = friendsData;
+    const person = p => `<span class="fr-who"><strong>${escape(p.name || p.email)}</strong>${p.name ? `<small>${escape(p.email)}</small>` : ''}</span>`;
+    let html = '';
+    if (incoming.length) {
+      html += '<h3>Friend requests for you</h3>' + incoming.map(r => `<div class="fr-row">${person(r)}<span class="fr-actions">` +
+        `<button class="btn primary" type="button" data-accept="${escape(r.id)}">Accept</button>` +
+        `<button class="btn" type="button" data-decline="${escape(r.id)}">Decline</button></span></div>`).join('');
+    }
+    html += '<h3>Your friends</h3>' + (friends.length
+      ? friends.map(f => `<div class="fr-row">${person(f)}<span class="fr-actions">` +
+        `<button class="star-btn${f.best ? ' on' : ''}" type="button" data-best="${escape(f.id)}" aria-pressed="${f.best}" ` +
+        `title="${f.best ? 'Best friend: their page shows next to yours. Tap to unmark.' : 'Make best friend'}">${f.best ? '⭐' : '☆'}</button>` +
+        `<button class="btn" type="button" data-read="${escape(f.id)}">View diary</button>` +
+        `<button class="link-btn" type="button" data-unfriend="${escape(f.id)}">Remove</button></span></div>`).join('')
+      : '<p class="fr-empty">No friends yet. Add one above!</p>');
+    if (outgoing.length) {
+      html += '<h3>Waiting for them to accept</h3>' + outgoing.map(r => `<div class="fr-row">${person(r)}<span class="fr-actions">` +
+        `<button class="link-btn" type="button" data-cancel="${escape(r.id)}">Cancel</button></span></div>`).join('');
+    }
+    html += '<p class="fr-note">⭐ Your best friend\'s page for the same day shows next to yours. ' +
+      'Friends only ever see pages you switch to 👫 Friends.</p>';
+    els.friendSections.innerHTML = html;
+  }
+
+  function friendMessage(text, isError = false) {
+    els.addFriendMsg.textContent = text;
+    els.addFriendMsg.classList.toggle('error', isError);
+  }
+
+  els.friendsBtn.addEventListener('click', () => {
+    friendMessage('');
+    renderFriendSections();
+    els.friendsDialog.showModal();
+    loadFriends();
+  });
+  $('friendsClose').addEventListener('click', () => els.friendsDialog.close());
+  els.friendsDialog.addEventListener('click', e => {
+    if (e.target === els.friendsDialog) els.friendsDialog.close(); // a click on the backdrop
+  });
+
+  els.addFriendForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = els.friendEmail.value.trim();
+    if (!email) return friendMessage('Type your friend\'s Google email first.', true);
+    friendMessage('Sending…');
+    try {
+      const res = await Api.post('/api/friend-requests', { email });
+      els.friendEmail.value = '';
+      friendMessage(res.status === 'friends'
+        ? `You and ${res.name} are now friends! 🎉`
+        : `Request sent to ${email}. They'll see it when they next open their diary.`);
+      await loadFriends();
+      renderFriendSections();
+    } catch (err) {
+      friendMessage(err.message, true);
+    }
+  });
+
+  els.friendSections.addEventListener('click', async e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const d = b.dataset;
+    const friend = id => friendsData.friends.find(f => f.id === id);
+    try {
+      if (d.accept) {
+        await Api.post(`/api/friend-requests/${d.accept}`);
+        toast('You are now friends! 🎉');
+      } else if (d.decline) {
+        await Api.del(`/api/friend-requests/${d.decline}`);
+      } else if (d.cancel) {
+        await Api.del(`/api/friend-requests/${d.cancel}`);
+      } else if (d.best) {
+        const f = friend(d.best);
+        await Api.put(`/api/friends/${f.id}`, { best: !f.best });
+        toast(f.best ? `${f.name} is no longer your best friend.` : `⭐ ${f.name} is your best friend: their page shows next to yours.`);
+      } else if (d.unfriend) {
+        const f = friend(d.unfriend);
+        if (!confirm(`Remove ${f.name} from your friends?\nYou'll both stop seeing each other's shared pages.`)) return;
+        await Api.del(`/api/friends/${f.id}`);
+        if (view?.friend.id === f.id) closeFriend();
+      } else if (d.read) {
+        els.friendsDialog.close();
+        return openFriend(friend(d.read));
+      } else return;
+      await loadFriends();
+      renderFriendSections();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  // ---------- Setting: are new pages private or shared? ----------
+  function renderShareDefault() {
+    els.shareDefaultSeg.querySelectorAll('button').forEach(b => {
+      const on = (b.dataset.share === '1') === state.shareNewPages;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', on);
+    });
+  }
+  els.shareDefaultSeg.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    state.shareNewPages = b.dataset.share === '1';
+    renderShareDefault();
+    touchPrefs();
+    toast(state.shareNewPages ? 'New pages will be shared with your friends.' : 'New pages will be private.');
+  });
 
   // ---------- Drawer (small screens) ----------
   function setDrawer(open) {
@@ -1173,5 +1447,8 @@
   if (dirty.size) saveNow();
   window.addEventListener('resize', autosize);
   Account.mountMenu(user, { beforeLogout: saveNow });
+  renderShareDefault();
+  els.friendsBtn.hidden = false;
+  loadFriends();
   if (moved) toast(`Moved ${moved} page${moved === 1 ? '' : 's'} from this browser into your account.`);
 })();

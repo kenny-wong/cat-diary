@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkEntry, cleanName, cleanPrefs, isId, sniffImage, MAX_PHOTO_BYTES } from '../lib/validate.js';
+import { checkEntry, cleanName, cleanPrefs, isId, normalizeEmail, sniffImage, MAX_PHOTO_BYTES } from '../lib/validate.js';
 
 test('names are tidied', () => {
   assert.equal(cleanName('  Mochi   the  cat '), 'Mochi the cat');
@@ -32,8 +32,8 @@ test('bad pages are refused', () => {
 });
 
 test('prefs fall back to defaults', () => {
-  assert.deepEqual(cleanPrefs({ defaultTheme: 'night', view: 'list' }), { defaultTheme: 'night', view: 'list' });
-  assert.deepEqual(cleanPrefs({ defaultTheme: 'evil', view: 1 }), { defaultTheme: 'cat', view: 'calendar' });
+  assert.deepEqual(cleanPrefs({ defaultTheme: 'night', view: 'list', shareNewPages: true }), { defaultTheme: 'night', view: 'list', shareNewPages: true });
+  assert.deepEqual(cleanPrefs({ defaultTheme: 'evil', view: 1, shareNewPages: 'yes' }), { defaultTheme: 'cat', view: 'calendar', shareNewPages: false });
 });
 
 test('image types are recognised from their bytes', () => {
@@ -45,4 +45,16 @@ test('image types are recognised from their bytes', () => {
 
 test('photo limit leaves room inside a 2 MB database row', () => {
   assert.ok(MAX_PHOTO_BYTES < 2000000);
+});
+
+test('pages are private unless shared is exactly true', () => {
+  assert.equal(checkEntry('abc123', page).shared, 0);
+  assert.equal(checkEntry('abc123', { ...page, shared: true }).shared, 1);
+  assert.equal(checkEntry('abc123', { ...page, shared: 'true' }).shared, 0);
+});
+
+test('friend emails are trimmed, lower-cased and checked', () => {
+  assert.equal(normalizeEmail('  Mochi@GMail.com '), 'mochi@gmail.com');
+  assert.equal(normalizeEmail('not-an-email'), null);
+  assert.equal(normalizeEmail(null), null);
 });

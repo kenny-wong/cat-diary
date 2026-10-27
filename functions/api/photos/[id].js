@@ -3,15 +3,28 @@ import { MAX_PHOTO_BYTES, isId, sniffImage } from '../../../lib/validate.js';
 
 const MAX_USER_BYTES = 500 * 1024 * 1024; // photo space per account
 
-export async function onRequestGet({ env, data, params }) {
+// Your own photo, or (with ?owner=<friend id>) a friend's photo that is on a page they share with friends.
+export async function onRequestGet({ request, env, data, params }) {
   if (!data.user) return unauthorized();
   if (!isId(params.id)) return badRequest('Bad photo id.');
+  const owner = new URL(request.url).searchParams.get('owner') || data.user.id;
+  if (!isId(owner)) return badRequest('Bad owner.');
+  const mine = owner === data.user.id;
   try {
-    const row = await env.DB.prepare('SELECT mime, data FROM photos WHERE user_id = ? AND id = ?').bind(data.user.id, params.id).first();
+    if (!mine) {
+      const allowed = await env.DB.prepare(
+        `SELECT 1 FROM friendships f JOIN entries e ON e.user_id = f.friend_id
+         WHERE f.user_id = ? AND f.friend_id = ? AND e.shared = 1 AND instr(e.data, ?) > 0 LIMIT 1`)
+        .bind(data.user.id, owner, `"photo:${params.id}"`).first();
+      if (!allowed) return json({ error: 'Photo not found.' }, 404);
+    }
+    const row = await env.DB.prepare('SELECT mime, data FROM photos WHERE user_id = ? AND id = ?').bind(owner, params.id).first();
     if (!row) return json({ error: 'Photo not found.' }, 404);
     const bytes = row.data instanceof ArrayBuffer ? row.data : new Uint8Array(row.data);
-    // Photo ids never get new content, so the browser may keep them for good.
-    return new Response(bytes, { headers: { 'Content-Type': row.mime, 'Cache-Control': 'private, max-age=31536000, immutable' } });
+    // Photo ids never get new content, so your own photos may be kept for good.
+    // A friend's photo is kept only briefly, so making a page private again soon hides it.
+    const cache = mine ? 'private, max-age=31536000, immutable' : 'private, max-age=300';
+    return new Response(bytes, { headers: { 'Content-Type': row.mime, 'Cache-Control': cache } });
   } catch (err) {
     return serverError(err, 'get photo');
   }

@@ -17,3 +17,9 @@ test('timingSafeEqual', () => {
   assert.equal(timingSafeEqual('abc', 'abd'), false);
   assert.equal(timingSafeEqual('abc', null), false);
 });
+
+test('new ids are url-safe letters and digits, so isId accepts them', async () => {
+  const { newId } = await import('../lib/crypto.js');
+  const { isId } = await import('../lib/validate.js');
+  for (let i = 0; i < 200; i++) assert.equal(isId(newId()), true);
+});
