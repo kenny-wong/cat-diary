@@ -5,6 +5,7 @@
   const STORE_KEY = 'littleDiary.v1';
   const MIGRATED_KEY = 'littleDiary:migratedTo:v1';
   const LAST_PAGE_KEY = 'littleDiary:lastPage:v1';
+  const TRIED_LATER_KEY = 'littleDiary:triedLater:v1';
   const PHOTO_BYTES = 1500000; // stay well under the server's 1.9 MB photo limit
   const MOODS = [['😊', 'Happy'], ['🥰', 'Loved'], ['😆', 'Excited'], ['😌', 'Calm'], ['😐', 'Meh'], ['😢', 'Sad'], ['😠', 'Grumpy'], ['😴', 'Sleepy']];
   const WEATHERS = [['☀️', 'Sunny'], ['⛅', 'Cloudy'], ['🌧️', 'Rainy'], ['⛈️', 'Stormy'], ['❄️', 'Snowy'], ['🌈', 'Rainbow'], ['🌬️', 'Windy']];
@@ -45,7 +46,8 @@
     return { get: id => run('readonly', s => s.get(id)) };
   })();
   const isPhoto = ref => ref.startsWith('photo:');
-  const photoUrl = (id, owner) => `/api/photos/${encodeURIComponent(id)}${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`;
+  const photoUrl = (id, owner) => (Demo.active ? Demo.photoUrl(id)
+    : `/api/photos/${encodeURIComponent(id)}${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`);
   // Photos known to be on the server, so the ones no page uses any more can be removed.
   const knownPhotos = new Set();
 
@@ -177,8 +179,11 @@
         '• Pick a template above the page: Cat Café, Sakura, Seaside and more.\n' +
         '• Tap a sticker in the sticker box to stick it on the page.\n' +
         '• Drag a sticker to move it. Pull the corner dot to resize and spin it, or tap × to peel it off.\n' +
-        '• Everything saves to your account by itself, so your diary is there on any phone or computer you log in on.\n' +
-        '• Pages are private (🔒). Tap 🔒 to let your friends read a page, and add friends with the 👫 Friends button.\n\n' +
+        (trying
+          ? '• While you try it, your pages are kept on this device. Sign in with Google to keep them in your own diary, on any phone or computer.\n' +
+            '• Once you have a diary, you can add friends and share pages with them.\n\n'
+          : '• Everything saves to your account by itself, so your diary is there on any phone or computer you log in on.\n' +
+            '• Pages are private (🔒). Tap 🔒 to let your friends read a page, and add friends with the 👫 Friends button.\n\n') +
         'Now tell me about your day ✏️',
       stickers: [
         { id: uid(), ref: 'svg:tapePaw', x: 30, y: 6, size: 150, rot: -5 },
@@ -267,6 +272,7 @@
   // A tapped phone notification opens /#note=<id>; remember it before sign-in tidies the address bar.
   const startNote = new URLSearchParams(location.hash.slice(1)).get('note');
   const user = await Account.start();
+  const trying = !!user.trying; // no account yet: demo.js keeps the pages on this device
   let state;
   // While reading a friend's diary, the sidebar and page show `view` ({ friend, entries, currentId }) instead of `state`.
   let view = null;
@@ -306,16 +312,9 @@
     }
   }
 
-  async function moveLegacyDiary() {
-    const legacy = legacyEntries().filter(e => !state.entries.some(x => x.id === e.id));
-    if (!legacy.length) return 0;
-    const n = legacy.length;
-    if (!confirm(`This browser has ${n} page${n === 1 ? '' : 's'} from your diary before you had an account.\n\n` +
-      `Add ${n === 1 ? 'it' : 'them'} to the diary of ${user.email}?\n(Cancel to ask again next time.)`)) {
-      try { sessionStorage.setItem(MIGRATED_KEY, 'later'); } catch { /* blocked */ }
-      return 0;
-    }
-    for (const id of photoIdsIn(legacy)) {
+  // Pages kept in this browser, with their photos from IndexedDB, copied into the account.
+  async function uploadPages(pages) {
+    for (const id of photoIdsIn(pages)) {
       if (knownPhotos.has(id)) continue;
       try {
         let blob = await LegacyPhotos.get(id);
@@ -327,17 +326,47 @@
         if (err.status === 0 || err.status >= 500) throw err; // try again next time; other photos show as "not found"
       }
     }
-    for (const entry of legacy) {
+    for (const entry of pages) {
       await Api.put(`/api/entries/${entry.id}`, entry);
       state.entries.push(entry);
     }
+  }
+
+  async function moveLegacyDiary() {
+    const legacy = legacyEntries().filter(e => !state.entries.some(x => x.id === e.id));
+    if (!legacy.length) return 0;
+    const n = legacy.length;
+    if (!confirm(`This browser has ${n} page${n === 1 ? '' : 's'} from your diary before you had an account.\n\n` +
+      `Add ${n === 1 ? 'it' : 'them'} to the diary of ${user.email}?\n(Cancel to ask again next time.)`)) {
+      try { sessionStorage.setItem(MIGRATED_KEY, 'later'); } catch { /* blocked */ }
+      return 0;
+    }
+    await uploadPages(legacy);
     local.set(MIGRATED_KEY, user.id);
+    return n;
+  }
+
+  // Pages written on this device while trying the diary before signing in (demo.js).
+  async function moveTriedDiary() {
+    try {
+      if (sessionStorage.getItem(TRIED_LATER_KEY)) return 0;
+    } catch { /* blocked */ }
+    const tried = Demo.saved().map(sanitizeEntry).filter(Boolean).filter(e => !state.entries.some(x => x.id === e.id));
+    if (!tried.length) return 0;
+    const n = tried.length;
+    if (!confirm(`You wrote ${n} page${n === 1 ? '' : 's'} on this device while trying the diary.\n\n` +
+      `Add ${n === 1 ? 'it' : 'them'} to the diary of ${user.email}?\n(Cancel to keep ${n === 1 ? 'it' : 'them'} here and ask again next time.)`)) {
+      try { sessionStorage.setItem(TRIED_LATER_KEY, '1'); } catch { /* blocked */ }
+      return 0;
+    }
+    await uploadPages(tried);
+    await Demo.clear();
     return n;
   }
 
   let moved = 0;
   try {
-    moved = await moveLegacyDiary();
+    if (!trying) moved = (await moveLegacyDiary()) + (await moveTriedDiary());
   } catch (err) {
     alert(`Couldn't move all of your old pages: ${err.message}\nThey are still in this browser, and you'll be asked again next time.`);
   }
@@ -2628,6 +2657,7 @@ ${entry.body}`, friendsData.friends);
     autosize();
     showFound();
   });
+  if (trying) return; // no account: no menu, friends, notifications or push
   // Logging out also stops notifications on this device, so a shared device doesn't keep getting them.
   Account.mountMenu(user, { beforeLogout: async () => { await saveNow(); await unsubscribePush().catch(() => {}); } });
   renderShareDefault();

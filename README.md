@@ -6,7 +6,7 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 
 ## Getting started
 
-1. Open the link and tap **Continue with Google**.
+1. Open the link and tap **Continue with Google**. Not sure yet? Tap **Try it first** to write a page without signing in (it stays on that device), and sign in later to keep it.
 2. Your diary is ready. Write today's page, and it saves by itself.
 3. To change the name friends see, open the account menu (top right).
 
@@ -19,9 +19,11 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 - **Stickers**: cats, washi tapes, labels and emoji. Drag to move, pull the corner dot to resize or spin, and tap × to remove.
 - **Photos**: add from the sticker box, or drop or paste them onto the page. Choose a polaroid, taped, round or cut-out frame.
 - **Drawing**: tap ✏️ **Draw** in the sticker box and doodle. **Done** turns it into a sticker.
+- **Save as picture**: 📸 under the page turns it into a picture. On a phone you can save it to your photos or post it straight away.
 
 ## Finding old pages
 
+- The 🔥 **streak** above the calendar counts the days in a row you've written.
 - The **calendar** shows your mood on each day. There's also a year view and a Year › Month list.
 - **Search** finds pages by their words, and highlights them on the page you open.
 - **Export** in the account menu saves a backup, photos included, and **Import** brings it back.
@@ -41,6 +43,7 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 - **Mention a friend**: type **@** in your page or in a comment and pick a friend from the list (or type their first name, like @Chloe). They get a notification. On your own page, friends are told once the page is shared with friends, and the line under the page shows who's tagged.
 - The 🔔 **bell** shows new friend requests, mentions, comments, replies and reactions.
 - **Phone and computer notifications**: in the 🔔 panel, tap **Turn on notifications on this device**. They arrive even when the diary is closed. On iPhone or iPad, first use **Add to Home Screen**.
+- **Daily reminder**: once notifications are on, pick a time under ⏰ **Remind me to write**. You only get it on days you haven't written a page yet.
 
 ## Privacy
 

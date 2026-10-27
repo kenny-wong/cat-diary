@@ -13,6 +13,7 @@
   }
 
   async function request(method, path, body, { keepalive = false } = {}) {
+    if (Demo.active && path !== '/api/me') return Demo.request(method, path, body); // trying it without an account
     const opts = { method, headers: {}, credentials: 'same-origin', keepalive };
     if (body instanceof Blob) {
       opts.body = body;
@@ -88,13 +89,25 @@
     try {
       me = await Api.get('/api/me');
     } catch (err) {
+      if (Demo.active) return tryIt();
       return open(err.message);
     }
     if (me.user) {
+      if (Demo.active) { // signed in already: /?try just opens your own diary
+        Demo.active = false;
+        history.replaceState(null, '', location.pathname);
+      }
       currentUser = me.user;
       return me.user;
     }
+    if (Demo.active) return tryIt();
     return open(authError || (me.google ? '' : AUTH_ERRORS['google-off']));
+  }
+
+  async function tryIt() {
+    document.body.classList.add('trying');
+    $('tryBar').hidden = false;
+    return Demo.start();
   }
 
   // ---------- Account menu ----------
