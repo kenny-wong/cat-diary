@@ -133,10 +133,8 @@
 
   // ---------- State ----------
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  const todayStr = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+  const dateStr = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const todayStr = () => dateStr(new Date());
   const parseDate = s => {
     const [y, m, d] = s.split('-').map(Number);
     return new Date(y, m - 1, d);
@@ -668,6 +666,27 @@
     });
     const q = els.search.value.trim().toLowerCase();
     els.list.innerHTML = q ? searchHtml(q) : state.view === 'list' ? treeHtml() : calendarHtml();
+    renderStreak();
+  }
+
+  // Days in a row with a page, back from today (or from yesterday while today has none yet).
+  // The reminder notifications count the same way: lib/reminders.js streak(); keep the two in step.
+  function streak(dates, today) {
+    const have = new Set(dates);
+    const d = parseDate(today);
+    if (!have.has(today)) d.setDate(d.getDate() - 1);
+    let n = 0;
+    for (; have.has(dateStr(d)); d.setDate(d.getDate() - 1)) n++;
+    return n;
+  }
+
+  function renderStreak() {
+    const today = todayStr();
+    const dates = state.entries.map(e => e.date);
+    const n = streak(dates, today);
+    const el = $('streak');
+    el.hidden = !n;
+    el.innerHTML = `🔥 <strong>${n}-day streak</strong>` + (dates.includes(today) ? '' : ' · write today to keep it going');
   }
 
   function searchHtml(q) {
@@ -1457,12 +1476,6 @@
   // ---------- Saving a page as a picture ----------
   // The page is laid out off screen at the width it has here (read-only markup, as friends see it), then
   // drawn into an SVG together with the stylesheet, the fonts and the photos, and the SVG onto a canvas.
-  const toDataUrl = blob => new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
-  });
   const fetchBlob = async url => {
     const res = await fetch(url, { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`${url}: ${res.status}`);
@@ -1472,7 +1485,7 @@
   async function pictureCss() {
     snapCss ||= (async () => {
       let fonts = await (await fetchBlob('/fonts.css')).text();
-      for (const url of new Set(fonts.match(/\/fonts\/[\w-]+\.woff2/g))) fonts = fonts.replaceAll(url, await toDataUrl(await fetchBlob(url)));
+      for (const url of new Set(fonts.match(/\/fonts\/[\w-]+\.woff2/g))) fonts = fonts.replaceAll(url, await blobToDataUrl(await fetchBlob(url)));
       return fonts + (await (await fetchBlob('/style.css')).text());
     })().catch(err => { snapCss = null; throw err; });
     return snapCss;
@@ -1492,7 +1505,7 @@
     for (const img of box.querySelectorAll('img')) {
       img.removeAttribute('loading');
       try {
-        img.src = await toDataUrl(await fetchBlob(img.getAttribute('src')));
+        img.src = await blobToDataUrl(await fetchBlob(img.getAttribute('src')));
       } catch {
         img.parentElement.classList.add('missing');
         img.parentElement.textContent = '📷';
@@ -2387,6 +2400,9 @@ ${entry.body}`, friendsData.friends);
     : Promise.resolve(null);
   let pushKey = null;
   let pushOn = false;
+  let reminder = null; // 'HH:MM' local time of the daily reminder, or null
+  const REMIND_TIMES = Array.from({ length: 31 }, (_, i) => `${pad(7 + Math.floor(i / 2))}:${i % 2 ? '30' : '00'}`); // 07:00 … 22:00
+  const timeLabel = t => new Date(2000, 0, 1, ...t.split(':').map(Number)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const keyBytes = k => Uint8Array.from(atob(k.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((k.length + 3) % 4)), c => c.charCodeAt(0));
 
   async function subscribePush() {
@@ -2412,7 +2428,7 @@ ${entry.body}`, friendsData.friends);
   async function setupPush() {
     if (pushSupported) {
       try {
-        pushKey = (await Api.get('/api/push')).key;
+        ({ key: pushKey, reminder } = await Api.get('/api/push'));
         pushOn = !!(pushKey && Notification.permission === 'granted' && await (await swReady)?.pushManager.getSubscription());
       } catch { /* stays off; the button lets the person try */ }
     }
@@ -2429,7 +2445,11 @@ ${entry.body}`, friendsData.friends);
     } else if (Notification.permission === 'denied') {
       html = '<p class="push-hint">Notifications are blocked for this site. Allow them in your browser\'s site settings, then come back here.</p>';
     } else if (pushOn) {
-      html = '<span class="push-on">🔔 Notifications are on for this device</span><button type="button" class="link-btn" data-push="off">Turn off</button>';
+      const times = reminder && !REMIND_TIMES.includes(reminder) ? [reminder, ...REMIND_TIMES] : REMIND_TIMES;
+      html = '<span class="push-on">🔔 Notifications are on for this device</span><button type="button" class="link-btn" data-push="off">Turn off</button>' +
+        '<label class="remind-row"><span>⏰ Remind me to write</span><select data-remind>' +
+        ['', ...times].map(t => `<option value="${t}"${t === (reminder || '') ? ' selected' : ''}>${t ? timeLabel(t) : 'Off'}</option>`).join('') +
+        '</select></label>';
     } else {
       html = '<button type="button" class="btn primary push-btn" data-push="on">🔔 Turn on notifications on this device</button>' +
         '<p class="push-hint">Get a notification on this phone or computer, even when the diary is closed.</p>';
@@ -2454,6 +2474,21 @@ ${entry.body}`, friendsData.friends);
       }
     } catch (err) {
       toast(err.message || "Couldn't change notifications on this device.");
+    }
+    renderPushRow();
+  });
+
+  // Daily reminder: sent at that time (this device's time zone) on days without a page yet, to every device with notifications on.
+  els.pushRow.addEventListener('change', async e => {
+    const sel = e.target.closest('[data-remind]');
+    if (!sel) return;
+    const time = sel.value || null;
+    sel.disabled = true;
+    try {
+      ({ time: reminder } = await Api.put('/api/reminder', { time, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
+      toast(time ? `⏰ On days you haven't written yet, you'll get a reminder at ${timeLabel(time)}.` : 'Daily reminder is off.');
+    } catch (err) {
+      toast(`Couldn't change the reminder: ${err.message}`);
     }
     renderPushRow();
   });

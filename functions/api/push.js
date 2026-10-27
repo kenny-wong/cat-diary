@@ -3,10 +3,15 @@ import { isPushEndpoint, pushEnabled } from '../../lib/push.js';
 
 const MAX_DEVICES = 10;
 
-// The site's public push key, or null when push isn't set up.
-export function onRequestGet({ env, data }) {
+// The site's public push key (null when push isn't set up) and the daily reminder time (null when off).
+export async function onRequestGet({ env, data }) {
   if (!data.user) return unauthorized();
-  return json({ key: pushEnabled(env) ? env.VAPID_PUBLIC_KEY : null });
+  try {
+    const row = await env.DB.prepare('SELECT remind_at FROM users WHERE id = ?').bind(data.user.id).first();
+    return json({ key: pushEnabled(env) ? env.VAPID_PUBLIC_KEY : null, reminder: row?.remind_at ?? null });
+  } catch (err) {
+    return serverError(err, 'push settings');
+  }
 }
 
 // Turn notifications on for this device: the browser's PushSubscription as JSON.

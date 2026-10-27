@@ -1,0 +1,9 @@
+// A Worker with only a cron trigger; the secret CRON_SECRET must match the Pages project's.
+{
+  "name": "my-little-diary-cron",
+  "main": "index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": { "SITE": "https://my-little-diary.pages.dev" }
+}
