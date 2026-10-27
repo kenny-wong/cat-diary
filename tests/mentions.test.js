@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_MENTIONS, findMentions, scanMentions } from '../lib/mentions.js';
+import { MAX_MENTIONS, findMentions, mentionCounts, newlyMentioned, scanMentions } from '../lib/mentions.js';
 
 const people = [{ id: 'k', name: 'Kenny Wong' }, { id: 'uk', name: 'Kenny Wong UK' }, { id: 'c', name: 'Chloe' }, { id: 'n', name: '' }];
 
@@ -52,4 +52,14 @@ test('spans point at the mention in the text', () => {
   const text = 'Hi @Chloe and @Kenny Wong UK!';
   const r = scanMentions(text, friends);
   assert.deepEqual(r.spans.map(({ s, e }) => text.slice(s, e)), ['@Chloe', '@Kenny Wong UK']);
+});
+
+test('each new mention on a page tells again; re-saving the same text does not', () => {
+  const counts = text => mentionCounts(text, friends);
+  const told = new Map();
+  assert.deepEqual(newlyMentioned(counts('hi @Chloe Wong'), told), ['c']);
+  told.set('c', 1);
+  assert.deepEqual(newlyMentioned(counts('hi @Chloe Wong, more words'), told), []);
+  assert.deepEqual(newlyMentioned(counts('hi @Chloe Wong. Later @Chloe again'), told), ['c']);
+  assert.deepEqual(newlyMentioned(counts('@Kenny Lee'), told), ['k2']);
 });

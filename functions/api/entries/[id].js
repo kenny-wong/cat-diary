@@ -1,10 +1,11 @@
 import { badRequest, isoAt, json, readJson, serverError, unauthorized } from '../../../lib/http.js';
 import { newId } from '../../../lib/crypto.js';
 import { checkEntry, isId } from '../../../lib/validate.js';
-import { findMentions, mentionable } from '../../../lib/mentions.js';
+import { mentionCounts, mentionable, newlyMentioned } from '../../../lib/mentions.js';
 import { pageLabel, pushNote } from '../../../lib/push.js';
 
-// Friends mentioned as "@Name" on a shared page are told, once per page. Resolves to their names.
+// Friends mentioned as "@Name" on a shared page are told, again for each new mention of them (re-saving the
+// same text doesn't count). Resolves to the names of those just told.
 async function tellMentioned(context, me, entryId, entry) {
   const db = context.env.DB;
   const str = v => (typeof v === 'string' ? v : '');
@@ -12,14 +13,16 @@ async function tellMentioned(context, me, entryId, entry) {
 ${str(entry.body)}`;
   if (!text.includes('@')) return [];
   const friends = await mentionable(db, me.id);
-  const ids = findMentions(text, friends);
-  if (!ids.length) return [];
-  const told = new Set((await db.prepare('SELECT user_id FROM page_mentions WHERE entry_owner = ? AND entry_id = ?')
-    .bind(me.id, entryId).all()).results.map(r => r.user_id));
-  const fresh = friends.filter(f => ids.includes(f.id) && !told.has(f.id)).map(f => ({ ...f, noteId: newId() }));
+  const counts = mentionCounts(text, friends);
+  if (!counts.size) return [];
+  const told = new Map((await db.prepare('SELECT user_id, times FROM page_mentions WHERE entry_owner = ? AND entry_id = ?')
+    .bind(me.id, entryId).all()).results.map(r => [r.user_id, r.times]));
+  const ids = newlyMentioned(counts, told);
+  const fresh = friends.filter(f => ids.includes(f.id)).map(f => ({ ...f, noteId: newId() }));
   if (!fresh.length) return [];
   await db.batch(fresh.flatMap(f => [
-    db.prepare('INSERT OR IGNORE INTO page_mentions (entry_owner, entry_id, user_id) VALUES (?, ?, ?)').bind(me.id, entryId, f.id),
+    db.prepare(`INSERT INTO page_mentions (entry_owner, entry_id, user_id, times) VALUES (?, ?, ?, ?)
+      ON CONFLICT (entry_owner, entry_id, user_id) DO UPDATE SET times = max(times, excluded.times)`).bind(me.id, entryId, f.id, counts.get(f.id)),
     db.prepare("INSERT INTO notifications (id, user_id, actor_id, kind, entry_owner, entry_id, created_at) VALUES (?, ?, ?, 'tag', ?, ?, ?)")
       .bind(f.noteId, f.id, me.id, me.id, entryId, isoAt()),
   ]));
