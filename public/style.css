@@ -1342,3 +1342,17 @@ body.drawing .fab, body.drawing .tray { visibility: hidden; }
 .push-row .link-btn { padding: 0; font-size: 12px; }
 .push-hint { margin: 0; color: var(--muted); font-size: 12px; }
 .push-on { font-weight: 500; }
+
+/* ---------- Live comments ---------- */
+.live-dot { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; font-size: 11px; font-weight: 500; color: var(--muted); vertical-align: middle; }
+.live-dot::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #4caf6a; animation: live-pulse 2s ease-in-out infinite; }
+@keyframes live-pulse { 50% { opacity: .35; } }
+.comment.fresh { animation: comment-in 2.6s ease; }
+@keyframes comment-in {
+  0% { opacity: 0; transform: translateY(6px); box-shadow: 0 0 0 2px var(--accent); }
+  15% { opacity: 1; transform: none; }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::before, .comment.fresh { animation: none; }
+}

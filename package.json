@@ -1,6 +1,6 @@
 {
   "name": "my-little-diary",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "private": true,
   "type": "module",
   "description": "My Little Diary: a decorated online diary with accounts, templates, stickers and photos.",

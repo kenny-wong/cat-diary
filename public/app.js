@@ -432,6 +432,7 @@
     // Coming back to the tab: pick up new friend requests and the best friend's latest pages.
     if (!document.hidden && Date.now() - friendsLoadedAt > 60000) loadFriends();
     if (!document.hidden && Date.now() - notesLoadedAt > 3000) loadNotifications();
+    if (!document.hidden) refreshVisibleTalks();
   });
 
   let toastTimer;
@@ -1656,34 +1657,77 @@
     const threads = d.comments.filter(c => !c.parentId).map(c =>
       `<div class="thread">${one(c)}<div class="replies">${d.comments.filter(r => r.parentId === c.id).map(one).join('')}</div></div>`).join('');
     return `<div class="reacts">${reacts}</div>` +
-      `<h3 class="talk-title">💬 ${n ? `${n} comment${n === 1 ? '' : 's'}` : 'Comments'}</h3>` +
+      `<h3 class="talk-title">💬 ${n ? `${n} comment${n === 1 ? '' : 's'}` : 'Comments'}<span class="live-dot" title="New comments appear by themselves">live</span></h3>` +
       `<div class="threads">${threads}</div>` + commentForm();
   }
 
-  async function loadTalk(section) {
-    if (!section) return;
+  // Loads (or refreshes) one page's comments. Called again every few seconds while it's on screen,
+  // so it redraws only when something changed, and keeps whatever is being typed, and where.
+  // poll: a background check, skipped while another load is on its way. Other loads always run,
+  // and only the newest answer is drawn.
+  async function loadTalk(section, { poll = false } = {}) {
+    if (!section || (poll && section.loading)) return;
     const { owner, entry } = section.dataset;
+    const key = `${owner}/${entry}`;
+    const seq = (section.loadSeq || 0) + 1;
+    section.loadSeq = seq;
+    section.loading = true;
     let data = null;
     try {
       data = await Api.get(`/api/talk?owner=${encodeURIComponent(owner)}&entry=${encodeURIComponent(entry)}`);
     } catch { /* not saved yet, or no longer visible: no comments area */ }
-    if (section.dataset.owner !== owner || section.dataset.entry !== entry) return; // a different page by now
+    if (section.loadSeq !== seq) return; // a newer load is on its way
+    section.loading = false;
+    if (`${section.dataset.owner}/${section.dataset.entry}` !== key) return; // a different page by now
     const mine = section === els.myTalk;
     // On your own private page the area only shows when there is something to read.
     const quiet = !data || (mine && !current().shared && !data.comments.length && !data.reactions.length);
-    section.hidden = mine && quiet;
-    // Keep anything being typed across the refresh.
-    const drafts = [...section.querySelectorAll('.c-form')]
-      .map(f => ({ parent: f.dataset.parent, text: f.querySelector('textarea').value }))
-      .filter(d => d.text);
-    section.innerHTML = data && !section.hidden ? talkHtml(data) : '';
+    const hidden = mine && quiet;
+    const signature = `${key}|${hidden}|${JSON.stringify(data)}`;
+    if (signature === section.signature) return; // nothing new
+    const seen = section.seenKey === key ? section.seenIds : null;
+    section.signature = signature;
+    section.hidden = hidden;
+
+    // Keep anything being typed (and an open reply box) across the redraw, with the cursor where it was.
+    const active = document.activeElement;
+    const drafts = [...section.querySelectorAll('.c-form')].map(f => {
+      const text = f.querySelector('textarea');
+      return { parent: f.dataset.parent, text: text.value, focus: text === active ? [text.selectionStart, text.selectionEnd] : null };
+    }).filter(d => d.text || d.focus || d.parent);
+    section.innerHTML = data && !hidden ? talkHtml(data) : '';
     for (const d of drafts) {
       const c = d.parent && section.querySelector(`.comment[data-id="${CSS.escape(d.parent)}"]`);
+      if (d.parent && !c) continue; // the comment being replied to was deleted
       if (c) c.insertAdjacentHTML('afterend', commentForm(d.parent, c.dataset.name));
-      const form = d.parent ? section.querySelector('.c-form.reply') : section.querySelector('.c-form:not(.reply)');
-      if (form) form.querySelector('textarea').value = d.text;
+      const text = (d.parent ? section.querySelector('.c-form.reply') : section.querySelector('.c-form:not(.reply)'))?.querySelector('textarea');
+      if (!text) continue;
+      text.value = d.text;
+      if (d.focus) {
+        text.focus({ preventScroll: true });
+        text.setSelectionRange(...d.focus);
+      }
+    }
+    // Comments that arrived since the last look get a short highlight.
+    const ids = new Set((data?.comments || []).map(c => c.id));
+    if (seen) {
+      for (const id of ids) if (!seen.has(id)) section.querySelector(`.comment[data-id="${CSS.escape(id)}"]`)?.classList.add('fresh');
+    }
+    section.seenKey = key;
+    section.seenIds = ids;
+  }
+
+  // Live comments: every few seconds, refresh the comment areas that are on screen.
+  const TALK_EVERY = 4000;
+  function refreshVisibleTalks() {
+    if (document.hidden) return;
+    for (const section of document.querySelectorAll('.talk')) {
+      if (section.hidden || !section.dataset.entry) continue;
+      const r = section.getBoundingClientRect();
+      if (r.height && r.bottom > 0 && r.top < window.innerHeight) loadTalk(section, { poll: true });
     }
   }
+  setInterval(refreshVisibleTalks, TALK_EVERY);
 
   document.addEventListener('click', async e => {
     const section = e.target.closest('.talk');
@@ -1766,6 +1810,7 @@
       return;
     }
     const fresh = notes.items.filter(n => !n.read && !seenNotes.has(n.id));
+    if (notesLoadedAt && fresh.some(n => !FRIEND_NOTES.includes(n.kind))) refreshVisibleTalks();
     // A new friend request or friend: refresh the friend list (and its badge) too.
     if (notesLoadedAt && fresh.some(n => FRIEND_NOTES.includes(n.kind))) loadFriends();
     notes.items.forEach(n => seenNotes.add(n.id));
@@ -1872,14 +1917,16 @@
   }
 
   // Once allowed, keep this device registered for whoever is signed in (also after signing in again).
+  // The panel shows the current state at once; registering with the push service can take a while.
   async function setupPush() {
     if (pushSupported) {
       try {
         pushKey = (await Api.get('/api/push')).key;
-        if (pushKey && Notification.permission === 'granted') await subscribePush();
+        pushOn = !!(pushKey && Notification.permission === 'granted' && await (await swReady)?.pushManager.getSubscription());
       } catch { /* stays off; the button lets the person try */ }
     }
     renderPushRow();
+    if (pushKey && Notification.permission === 'granted') subscribePush().then(renderPushRow, () => {});
   }
 
   function renderPushRow() {
@@ -1931,7 +1978,10 @@
   // Messages from the service worker: news arrived (refresh the bell), or a notification was tapped.
   if (pushSupported) {
     navigator.serviceWorker.addEventListener('message', e => {
-      if (e.data?.type === 'notes') loadNotifications();
+      if (e.data?.type === 'notes') {
+        loadNotifications();
+        refreshVisibleTalks();
+      }
       if (e.data?.type === 'open') {
         const id = new URLSearchParams(new URL(e.data.url).hash.slice(1)).get('note');
         if (id) openNoteById(id);
