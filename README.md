@@ -7,7 +7,7 @@ Live at **https://my-little-diary.pages.dev**
 ## Features
 
 - **Accounts**: "Continue with Google" is the only way in. A first sign-in creates the diary, named after the Google account; change the name any time in the account menu (friends see it).
-- **Friends**: add friends by their Google email, accept or decline requests, remove friends. Each page has a 🔒 Private / 👫 Friends switch, and a setting chooses which one new pages start with.
+- **Friends**: add friends by their Google email (only people who already have a diary; unknown emails are refused with a message), accept or decline requests, remove friends. Each page has a 🔒 Private / 👫 Friends switch, and a setting chooses which one new pages start with.
 - **Best friends**: mark up to 4 friends with ⭐ (the Friends panel shows the count, e.g. 1/4). Their pages for the same day show next to yours (your page on the left, or on top on narrow screens); with 2–4 best friends, tabs switch between them.
 - **Online & last active**: the Friends panel shows which friends are online now (diary on screen in the last 2½ minutes), when the others were last active, and when each last wrote a page (private pages included, time only).
 - **Read a friend's diary**: browse a friend's calendar, seeing only the pages they share with friends.

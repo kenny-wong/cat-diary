@@ -1613,7 +1613,7 @@
       els.friendEmail.value = '';
       friendMessage(res.status === 'friends'
         ? `You and ${res.name} are now friends! 🎉`
-        : `Request sent to ${email}. They'll see it when they next open their diary.`);
+        : `Request sent to ${res.name || email}. They'll get a notification.`);
       await loadFriends();
       renderFriendSections();
     } catch (err) {
