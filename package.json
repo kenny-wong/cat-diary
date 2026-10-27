@@ -1,0 +1,17 @@
+{
+  "name": "cat-diary",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "My Little Diary: a decorated online diary with accounts, templates, stickers and photos.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "dev": "wrangler pages dev --port 8790",
+    "deploy": "wrangler pages deploy --branch main",
+    "db:migrate:local": "wrangler d1 migrations apply cat-diary-db --local",
+    "db:migrate": "wrangler d1 migrations apply cat-diary-db --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.153.0"
+  }
+}

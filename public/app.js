@@ -1,16 +1,20 @@
-(() => {
+(async () => {
   'use strict';
 
+  // Before accounts, the diary lived only in the browser under this key. It is now read once, to offer moving it into the account.
   const STORE_KEY = 'littleDiary.v1';
+  const MIGRATED_KEY = 'littleDiary:migratedTo:v1';
+  const LAST_PAGE_KEY = 'littleDiary:lastPage:v1';
+  const PHOTO_BYTES = 1500000; // stay well under the server's 1.9 MB photo limit
   const MOODS = [['😊', 'Happy'], ['🥰', 'Loved'], ['😆', 'Excited'], ['😌', 'Calm'], ['😐', 'Meh'], ['😢', 'Sad'], ['😠', 'Grumpy'], ['😴', 'Sleepy']];
   const WEATHERS = [['☀️', 'Sunny'], ['⛅', 'Cloudy'], ['🌧️', 'Rainy'], ['⛈️', 'Stormy'], ['❄️', 'Snowy'], ['🌈', 'Rainbow'], ['🌬️', 'Windy']];
   const FRAMES = ['polaroid', 'tape', 'round', 'none'];
   const PHOTO_MAX = 1400;
   const { paw, blossom, escape } = Stickers;
 
-  // Photos are too big for localStorage, so their image data lives in IndexedDB.
-  // A page only stores a sticker with ref "photo:<id>".
-  const PhotoStore = (() => {
+  // Photos from the browser-only diary, kept in IndexedDB. Read once when moving that diary into an account.
+  // A page only stores a sticker with ref "photo:<id>"; the image itself lives on the server at /api/photos/<id>.
+  const LegacyPhotos = (() => {
     let dbPromise;
     const open = () => dbPromise || (dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open('littleDiaryPhotos', 1);
@@ -27,28 +31,12 @@
         tx.onerror = () => reject(tx.error);
       });
     };
-    return {
-      put: (id, blob) => run('readwrite', s => s.put(blob, id)),
-      get: id => run('readonly', s => s.get(id)),
-      del: id => run('readwrite', s => s.delete(id)),
-      all: async () => {
-        const db = await open();
-        return new Promise((resolve, reject) => {
-          const out = new Map();
-          const tx = db.transaction('photos');
-          tx.objectStore('photos').openCursor().onsuccess = e => {
-            const cursor = e.target.result;
-            if (cursor) { out.set(cursor.key, cursor.value); cursor.continue(); }
-          };
-          tx.oncomplete = () => resolve(out);
-          tx.onerror = () => reject(tx.error);
-        });
-      },
-    };
+    return { get: id => run('readonly', s => s.get(id)) };
   })();
-  const photoUrls = new Map();
-  let photosAvailable = true;
   const isPhoto = ref => ref.startsWith('photo:');
+  const photoUrl = id => `/api/photos/${encodeURIComponent(id)}`;
+  // Photos known to be on the server, so the ones no page uses any more can be removed.
+  const knownPhotos = new Set();
 
   // ---------- Templates ----------
   const ear = side =>
@@ -160,7 +148,7 @@
         '• Pick a template above the page: Cat Café, Sakura, Seaside and more.\n' +
         '• Tap a sticker in the sticker box to stick it on the page.\n' +
         '• Drag a sticker to move it. Pull the corner dot to resize and spin it, or tap × to peel it off.\n' +
-        '• Everything saves by itself in this browser. Use Export now and then to keep a backup.\n\n' +
+        '• Everything saves to your account by itself, so your diary is there on any phone or computer you log in on.\n\n' +
         'Now tell me about your day ✏️',
       stickers: [
         { id: uid(), ref: 'svg:tapePaw', x: 30, y: 6, size: 150, rot: -5 },
@@ -203,29 +191,96 @@
     };
   }
 
-  function load() {
+  // Per-device conveniences only; storage may be blocked, and the diary works without it.
+  const local = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); } catch { /* blocked */ } },
+  };
+
+  const photoIdsIn = entries => {
+    const ids = new Set();
+    for (const e of entries) for (const s of e.stickers) if (isPhoto(s.ref)) ids.add(s.ref.slice(6));
+    return ids;
+  };
+
+  // ---------- Loading ----------
+  const user = await Account.start();
+  let state;
+  for (;;) {
     try {
+      const diary = await Api.get('/api/diary');
+      state = {
+        entries: diary.entries.map(sanitizeEntry).filter(Boolean),
+        currentId: local.get(LAST_PAGE_KEY),
+        defaultTheme: THEMES[diary.prefs.defaultTheme] ? diary.prefs.defaultTheme : 'cat',
+        view: diary.prefs.view === 'list' ? 'list' : 'calendar',
+      };
+      break;
+    } catch (err) {
+      if (err.status === 401) await Account.relogin();
+      else if (!confirm(`${err.message}\n\nTry again?`)) return;
+    }
+  }
+  photoIdsIn(state.entries).forEach(id => knownPhotos.add(id));
+
+  // Pages changed since the last save, and whether the settings changed.
+  const dirty = new Set();
+  let prefsDirty = false;
+
+  // The browser-only diary from before accounts, if this browser still has one to move.
+  function legacyEntries() {
+    if (local.get(MIGRATED_KEY)) return [];
+    try {
+      if (sessionStorage.getItem(MIGRATED_KEY)) return [];
       const saved = JSON.parse(localStorage.getItem(STORE_KEY));
-      if (saved && Array.isArray(saved.entries)) {
-        return {
-          entries: saved.entries.map(sanitizeEntry).filter(Boolean),
-          currentId: saved.currentId,
-          defaultTheme: THEMES[saved.defaultTheme] ? saved.defaultTheme : 'cat',
-          view: saved.view === 'list' ? 'list' : 'calendar',
-        };
-      }
-    } catch { /* fall through to a fresh diary */ }
-    return null;
+      return Array.isArray(saved?.entries) ? saved.entries.map(sanitizeEntry).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
   }
 
-  let state = load();
-  if (!state) {
-    state = { entries: [], currentId: null, defaultTheme: 'cat', view: 'calendar' };
+  async function moveLegacyDiary() {
+    const legacy = legacyEntries().filter(e => !state.entries.some(x => x.id === e.id));
+    if (!legacy.length) return 0;
+    const n = legacy.length;
+    if (!confirm(`This browser has ${n} page${n === 1 ? '' : 's'} from your diary before you had an account.\n\n` +
+      `Add ${n === 1 ? 'it' : 'them'} to the diary of ${user.email}?\n(Cancel to ask again next time.)`)) {
+      try { sessionStorage.setItem(MIGRATED_KEY, 'later'); } catch { /* blocked */ }
+      return 0;
+    }
+    for (const id of photoIdsIn(legacy)) {
+      if (knownPhotos.has(id)) continue;
+      try {
+        let blob = await LegacyPhotos.get(id);
+        if (!blob) continue;
+        if (blob.size > PHOTO_BYTES) blob = (await shrinkImage(blob)).blob;
+        await Api.put(`/api/photos/${id}`, blob);
+        knownPhotos.add(id);
+      } catch (err) {
+        if (err.status === 0 || err.status >= 500) throw err; // try again next time; other photos show as "not found"
+      }
+    }
+    for (const entry of legacy) {
+      await Api.put(`/api/entries/${entry.id}`, entry);
+      state.entries.push(entry);
+    }
+    local.set(MIGRATED_KEY, user.id);
+    return n;
+  }
+
+  let moved = 0;
+  try {
+    moved = await moveLegacyDiary();
+  } catch (err) {
+    alert(`Couldn't move all of your old pages: ${err.message}\nThey are still in this browser, and you'll be asked again next time.`);
+  }
+
+  if (!state.entries.length) {
     const first = welcomeEntry();
     state.entries.push(first);
     state.currentId = first.id;
+    dirty.add(first.id);
   }
-  if (!state.entries.length) state.entries.push(newEntry());
   if (!state.entries.some(e => e.id === state.currentId)) state.currentId = sortedEntries()[0].id;
 
   let selectedStickerId = null;
@@ -259,28 +314,71 @@
   }
 
   // ---------- Saving ----------
-  let saveTimer;
+  // Changes go to the server shortly after typing stops. Saves run one at a time, in order.
+  let saveTimer = null;
+  let saveChain = Promise.resolve();
+  const prefsBody = () => ({ defaultTheme: state.defaultTheme, view: state.view });
   function setStatus(kind) {
     els.saveStatus.classList.toggle('error', kind === 'error');
-    els.saveStatus.textContent = { saving: 'Saving…', saved: 'Saved ✓', error: "Couldn't save!" }[kind] || '';
+    els.saveStatus.textContent = { saving: 'Saving…', saved: 'Saved ✓', error: 'Not saved yet…' }[kind] || '';
+  }
+  function schedule(ms) {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, ms);
+  }
+  async function flush() {
+    const ids = [...dirty];
+    const prefs = prefsDirty;
+    dirty.clear();
+    prefsDirty = false;
+    if (!ids.length && !prefs) return;
+    try {
+      for (const id of ids) {
+        const entry = state.entries.find(e => e.id === id);
+        if (entry) await Api.put(`/api/entries/${id}`, entry);
+      }
+      if (prefs) await Api.put('/api/prefs', prefsBody());
+      if (!saveTimer && !dirty.size) setStatus('saved');
+    } catch (err) {
+      ids.forEach(id => dirty.add(id));
+      prefsDirty ||= prefs;
+      setStatus('error');
+      if (err.status === 400 || err.status === 413) toast(`Couldn't save: ${err.message}`);
+      else schedule(5000); // offline, logged out or a server hiccup: keep trying
+    }
   }
   function saveNow() {
     clearTimeout(saveTimer);
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(state));
-      setStatus('saved');
-    } catch {
-      setStatus('error');
-      toast('Saving failed: browser storage is full or blocked. Export a backup!');
-    }
+    saveTimer = null;
+    saveChain = saveChain.then(flush);
+    return saveChain;
   }
   function touch(entry = current()) {
-    if (entry) entry.updatedAt = Date.now();
+    if (entry) {
+      entry.updatedAt = Date.now();
+      dirty.add(entry.id);
+    }
     setStatus('saving');
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNow, 400);
+    schedule(600);
   }
-  window.addEventListener('beforeunload', () => { if (saveTimer) saveNow(); });
+  function touchPrefs() {
+    prefsDirty = true;
+    schedule(600);
+  }
+  // Closing the tab: send what's left with keepalive, and ask the browser to warn about unsaved changes.
+  window.addEventListener('beforeunload', e => {
+    if (!dirty.size && !prefsDirty) return;
+    for (const id of dirty) {
+      const entry = state.entries.find(x => x.id === id);
+      if (entry) Api.put(`/api/entries/${id}`, entry, { keepalive: true }).catch(() => {});
+    }
+    if (prefsDirty) Api.put('/api/prefs', prefsBody(), { keepalive: true }).catch(() => {});
+    e.preventDefault();
+  });
+  // Phones often close a tab without beforeunload, so save as soon as it goes to the background.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && (dirty.size || prefsDirty)) saveNow();
+  });
 
   let toastTimer;
   function toast(msg) {
@@ -503,12 +601,15 @@
     fitPage();
   }
 
-  function photoHtml(st) {
-    const url = photoUrls.get(st.ref.slice(6));
-    return url
-      ? `<div class="photo"><img src="${url}" alt="" draggable="false"></div>`
-      : `<div class="photo missing">📷 Photo not found in this browser</div>`;
-  }
+  const photoHtml = st => `<div class="photo"><img src="${photoUrl(st.ref.slice(6))}" alt="" draggable="false"></div>`;
+
+  els.layer.addEventListener('error', e => {
+    const img = e.target;
+    if (img.tagName !== 'IMG') return;
+    const box = img.parentElement;
+    box.classList.add('missing');
+    box.textContent = '📷 Photo not found';
+  }, true);
 
   // Grow the page so stickers placed near the bottom never fall off it.
   function fitPage() {
@@ -654,57 +755,77 @@
     return false;
   }
 
-  // Downscale big camera photos so the diary stays small. Transparent PNGs keep their transparency.
+  // Downscale big camera photos, then lower the quality (and if need be the size) until the photo is under PHOTO_BYTES.
+  // Transparent PNGs keep their transparency, so for them only the size can shrink.
   async function shrinkImage(file) {
     const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, PHOTO_MAX / Math.max(bmp.width, bmp.height));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(bmp.width * scale));
-    canvas.height = Math.max(1, Math.round(bmp.height * scale));
-    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    bmp.close();
-    const transparent = file.type !== 'image/jpeg' && hasTransparency(canvas);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, transparent ? 'image/png' : 'image/jpeg', 0.86));
-    if (!blob) throw new Error('Could not encode image');
-    return { blob, transparent };
+    let side = PHOTO_MAX;
+    let quality = 0.86;
+    let transparent = null;
+    try {
+      for (;;) {
+        const scale = Math.min(1, side / Math.max(bmp.width, bmp.height));
+        canvas.width = Math.max(1, Math.round(bmp.width * scale));
+        canvas.height = Math.max(1, Math.round(bmp.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+        transparent ??= file.type !== 'image/jpeg' && hasTransparency(canvas);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, transparent ? 'image/png' : 'image/jpeg', quality));
+        if (!blob) throw new Error('Could not encode image');
+        if (blob.size <= PHOTO_BYTES) return { blob, transparent };
+        if (!transparent && quality > 0.6) quality -= 0.13;
+        else if (side > 300) side = Math.round(Math.min(side, Math.max(canvas.width, canvas.height)) * 0.8);
+        else throw new Error('Image too big');
+      }
+    } finally {
+      bmp.close();
+    }
   }
 
   async function addPhotos(files, at) {
     const images = [...files].filter(f => f.type.startsWith('image/'));
     if (!images.length) return toast('Please choose an image file.');
-    if (!photosAvailable) return toast("This browser can't store photos (private mode?).");
+    const entry = current();
     let i = 0;
     for (const file of images) {
       try {
+        toast(images.length > 1 ? `Adding photo ${i + 1} of ${images.length}…` : 'Adding photo…');
         const { blob, transparent } = await shrinkImage(file);
         const pid = uid();
-        await PhotoStore.put(pid, blob);
-        photoUrls.set(pid, URL.createObjectURL(blob));
+        await Api.put(`/api/photos/${pid}`, blob);
+        knownPhotos.add(pid);
+        if (!state.entries.includes(entry)) return; // the page was torn out while the photo uploaded
+        if (current() !== entry) openEntry(entry.id);
         const offset = i++ * 24;
         addSticker(`photo:${pid}`, {
           frame: transparent ? 'none' : 'polaroid',
           ...(at && { x: clamp(at.x + offset / 10, 0, 100), y: at.y + offset }),
         });
-      } catch {
-        toast(`Couldn't add "${file.name}". Try a JPG or PNG.`);
+        els.toast.hidden = true;
+      } catch (err) {
+        toast(err.status !== undefined ? `Couldn't add "${file.name}": ${err.message}` : `Couldn't add "${file.name}". Try a JPG or PNG.`);
       }
     }
   }
 
-  function referencedPhotos() {
-    const used = new Set();
-    for (const e of state.entries) for (const s of e.stickers) if (isPhoto(s.ref)) used.add(s.ref.slice(6));
-    return used;
-  }
+  const referencedPhotos = () => photoIdsIn(state.entries);
 
-  // Remove photo data that no page uses any more.
-  function gcPhotos() {
+  // Remove photos from the server that no page uses any more (after saving, so the server agrees).
+  async function gcPhotos() {
     const used = referencedPhotos();
-    for (const [id, url] of photoUrls) {
-      if (used.has(id)) continue;
-      URL.revokeObjectURL(url);
-      photoUrls.delete(id);
-      PhotoStore.del(id).catch(() => {});
+    const unused = [...knownPhotos].filter(id => !used.has(id));
+    if (!unused.length) return;
+    await saveNow();
+    if (dirty.size) return; // not saved yet: try again on the next tidy-up
+    for (const id of unused) {
+      try {
+        await Api.del(`/api/photos/${id}`);
+        knownPhotos.delete(id);
+      } catch (err) {
+        if (err.status === 409) knownPhotos.delete(id);
+      }
     }
   }
 
@@ -845,6 +966,7 @@
     const entry = current();
     entry.theme = b.dataset.theme;
     state.defaultTheme = entry.theme;
+    prefsDirty = true;
     applyTheme(entry);
     renderList();
     touch(entry);
@@ -866,7 +988,7 @@
     renderList();
     setDrawer(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    touch(null);
+    local.set(LAST_PAGE_KEY, id);
   }
 
   els.list.addEventListener('click', e => {
@@ -914,7 +1036,7 @@
     state.view = b.dataset.view;
     els.search.value = '';
     renderList();
-    touch(null);
+    touchPrefs();
   });
 
   $('newBtn').addEventListener('click', () => {
@@ -925,15 +1047,24 @@
     els.title.focus();
   });
 
-  $('deleteBtn').addEventListener('click', () => {
+  $('deleteBtn').addEventListener('click', async () => {
     const entry = current();
     const name = entry.title ? `"${entry.title}"` : 'this page';
     if (!confirm(`Tear out ${name}? This can't be undone.`)) return;
+    dirty.delete(entry.id);
     state.entries = state.entries.filter(e => e.id !== entry.id);
     if (!state.entries.length) state.entries.push(newEntry());
     openEntry(sortedEntries()[0].id);
-    gcPhotos();
-    toast('Page torn out.');
+    try {
+      await saveChain; // a save of this page that's already on its way must not bring it back
+      await Api.del(`/api/entries/${entry.id}`);
+      toast('Page torn out.');
+      gcPhotos();
+    } catch (err) {
+      state.entries.push(entry);
+      openEntry(entry.id);
+      toast(`Couldn't tear out the page: ${err.message}`);
+    }
   });
 
   els.search.addEventListener('input', renderList);
@@ -977,11 +1108,12 @@
 
   $('exportBtn').addEventListener('click', async () => {
     saveNow();
+    toast('Preparing your backup…');
     const photos = {};
     for (const id of referencedPhotos()) {
       try {
-        const blob = await PhotoStore.get(id);
-        if (blob) photos[id] = await blobToDataUrl(blob);
+        const res = await fetch(photoUrl(id));
+        if (res.ok) photos[id] = await blobToDataUrl(await res.blob());
       } catch { /* a missing photo is skipped */ }
     }
     const data = { app: 'my-little-diary', version: 2, exportedAt: new Date().toISOString(), entries: state.entries, photos };
@@ -998,30 +1130,38 @@
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
+    let data, incoming;
     try {
-      const data = JSON.parse(await file.text());
-      const incoming = (Array.isArray(data) ? data : data.entries || []).map(sanitizeEntry).filter(Boolean);
+      data = JSON.parse(await file.text());
+      incoming = (Array.isArray(data) ? data : data.entries || []).map(sanitizeEntry).filter(Boolean);
       if (!incoming.length) throw new Error('empty');
-      for (const [id, url] of Object.entries(data.photos || {})) {
-        if (!/^[a-z0-9]{1,40}$/i.test(id) || photoUrls.has(id) || typeof url !== 'string' || !url.startsWith('data:image/')) continue;
-        const blob = dataUrlToBlob(url);
-        await PhotoStore.put(id, blob);
-        photoUrls.set(id, URL.createObjectURL(blob));
-      }
-      let added = 0, updated = 0;
-      for (const entry of incoming) {
-        const i = state.entries.findIndex(x => x.id === entry.id);
-        if (i === -1) { state.entries.push(entry); added++; }
-        else if (entry.updatedAt > state.entries[i].updatedAt) { state.entries[i] = entry; updated++; }
-      }
-      saveNow();
-      gcPhotos();
-      renderEntry();
-      renderList();
-      toast(`Imported: ${added} new, ${updated} updated.`);
     } catch {
-      toast("That file doesn't look like a diary backup.");
+      return toast("That file doesn't look like a diary backup.");
     }
+    toast('Importing…');
+    try {
+      for (const [id, url] of Object.entries(data.photos || {})) {
+        if (!/^[a-z0-9]{1,40}$/i.test(id) || knownPhotos.has(id) || typeof url !== 'string' || !url.startsWith('data:image/')) continue;
+        let blob = dataUrlToBlob(url);
+        if (blob.size > PHOTO_BYTES) blob = (await shrinkImage(blob)).blob;
+        await Api.put(`/api/photos/${id}`, blob);
+        knownPhotos.add(id);
+      }
+    } catch (err) {
+      return toast(`Import stopped: ${err.message}`);
+    }
+    let added = 0, updated = 0;
+    for (const entry of incoming) {
+      const i = state.entries.findIndex(x => x.id === entry.id);
+      if (i === -1) { state.entries.push(entry); added++; }
+      else if (entry.updatedAt > state.entries[i].updatedAt) { state.entries[i] = entry; updated++; }
+      else continue;
+      dirty.add(entry.id);
+    }
+    renderEntry();
+    renderList();
+    await saveNow();
+    toast(dirty.size ? `Imported ${added} new, ${updated} updated. Still saving…` : `Imported: ${added} new, ${updated} updated.`);
   });
 
   // ---------- Start ----------
@@ -1029,14 +1169,9 @@
   renderTray();
   renderEntry();
   renderList();
-  saveNow();
   setStatus('');
+  if (dirty.size) saveNow();
   window.addEventListener('resize', autosize);
-
-  PhotoStore.all()
-    .then(all => {
-      for (const [id, blob] of all) photoUrls.set(id, URL.createObjectURL(blob));
-      renderStickers();
-    })
-    .catch(() => { photosAvailable = false; });
+  Account.mountMenu(user, { beforeLogout: saveNow });
+  if (moved) toast(`Moved ${moved} page${moved === 1 ? '' : 's'} from this browser into your account.`);
 })();

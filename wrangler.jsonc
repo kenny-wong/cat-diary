@@ -1,0 +1,13 @@
+{
+  "name": "cat-diary",
+  "pages_build_output_dir": "./public",
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cat-diary-db",
+      "database_id": "581be010-a405-4165-ba8c-befe9d68718c",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
