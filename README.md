@@ -11,7 +11,8 @@ Live at **https://my-little-diary.pages.dev**
 - **Best friends**: mark up to 4 friends with ⭐ (the Friends panel shows the count, e.g. 1/4). Their pages for the same day show next to yours (your page on the left, or on top on narrow screens); with 2–4 best friends, tabs switch between them.
 - **Read a friend's diary**: browse a friend's calendar, seeing only the pages they share with friends.
 - **Comments & reactions**: comment on shared pages, reply to comments, and react with emoji. You can delete your own comments, and any comment on your own pages.
-- **Notifications**: 🔔 bell with an unread badge for friend requests, accepted requests, comments, replies and reactions (checked every 15 seconds while the diary is open and straight away when you return to it, with optional pop-up alerts while the tab is in the background).
+- **Notifications**: 🔔 bell with an unread badge for friend requests, accepted requests, comments, replies and reactions (checked every 15 seconds while the diary is open and straight away when you return to it).
+- **Phone & computer notifications (Web Push)**: "Turn on notifications on this device" in the 🔔 panel. Works when the diary is closed (Android, Windows, Mac; iPhone/iPad after Add to Home Screen). Tapping one opens the right page. The diary can also be installed as an app (manifest + icons).
 - **Drawing**: ✏️ Draw in the sticker box. Doodle on the page; Done turns the drawing into a sticker you can move, resize and spin.
 - **Sports**: pick one or more sports for the day next to the weather (badminton, football, basketball, volleyball and more).
 - **Templates**: dress each page in Cat Café, Sakura, Seaside, Forest, Starry Night or Vintage, each with its own colours, paper style and decorations.
@@ -37,7 +38,8 @@ Plain HTML, CSS and JavaScript in `public/` (no build step), hosted on Cloudflar
 | `public/privacy.html`, `public/terms.html` | Privacy policy and terms of service (linked from the login screen and account menu) |
 | `public/_headers` | Security headers (CSP and friends) |
 | `functions/api/` | API routes: `auth/google`, `auth/google/callback`, `auth/logout`, `me`, `diary`, `prefs`, `entries/:id`, `photos/:id` (`?owner=` for a friend's shared photo), `friends`, `friends/:id` (best / remove), `friends/:id/diary`, `friend-requests`, `friend-requests/:id` (accept / decline / cancel), `talk` (comments + reactions of a page), `comments`, `comments/:id`, `reactions`, `notifications` |
-| `lib/` | Shared server code: tokens, sessions, validation, Google sign-in, friendships, comments |
+| `lib/` | Shared server code: tokens, sessions, validation, Google sign-in, friendships, comments, Web Push (encryption + VAPID) |
+| `public/sw.js`, `public/manifest.webmanifest`, `public/icons/` | Service worker (shows pushes, opens the diary when one is tapped), app manifest and icons |
 | `migrations/` | D1 database schema |
 | `tests/` | Unit tests (`npm test`) |
 
@@ -63,6 +65,7 @@ npm test
 | Name | For |
 | --- | --- |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | "Continue with Google". Both are set as encrypted secrets. Without them nobody can sign in. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push keys (P-256; the private key as a JWK). Without them the "Turn on notifications" button is hidden. Local dev uses its own pair in `.dev.vars`, plus `PUSH_ALLOW_LOCAL=1` so tests can use a local stand-in push service. |
 
 ### Google sign-in setup (done once)
 

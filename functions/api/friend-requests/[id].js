@@ -1,9 +1,11 @@
 import { badRequest, json, serverError, unauthorized } from '../../../lib/http.js';
 import { isId } from '../../../lib/validate.js';
 import { clearRequestNote, makeFriends } from '../../../lib/friends.js';
+import { pushNote } from '../../../lib/push.js';
 
 // Accept a request someone sent to your email.
-export async function onRequestPost({ env, data, params }) {
+export async function onRequestPost(context) {
+  const { env, data, params } = context;
   if (!data.user) return unauthorized();
   if (!isId(params.id)) return badRequest('Bad request id.');
   const me = data.user;
@@ -12,7 +14,8 @@ export async function onRequestPost({ env, data, params }) {
       'SELECT u.id, u.email, u.name FROM friend_requests r JOIN users u ON u.id = r.from_user WHERE r.id = ? AND r.to_email = ?')
       .bind(params.id, me.email).first();
     if (!from) return json({ error: 'This request is no longer there.' }, 404);
-    await makeFriends(env.DB, me, from);
+    const noteId = await makeFriends(env.DB, me, from);
+    pushNote(context, from.id, noteId, `${me.name} accepted your friend request. You're friends now!`);
     return json({ ok: true, name: from.name });
   } catch (err) {
     return serverError(err, 'accept friend');

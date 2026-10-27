@@ -37,7 +37,7 @@
     get: path => request('GET', path),
     post: (path, body) => request('POST', path, body),
     put: (path, body, opts) => request('PUT', path, body, opts),
-    del: path => request('DELETE', path),
+    del: (path, body) => request('DELETE', path, body),
   };
 
   // ---------- Sign-in screen ----------

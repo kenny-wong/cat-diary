@@ -240,6 +240,8 @@
   };
 
   // ---------- Loading ----------
+  // A tapped phone notification opens /#note=<id>; remember it before sign-in tidies the address bar.
+  const startNote = new URLSearchParams(location.hash.slice(1)).get('note');
   const user = await Account.start();
   let state;
   // While reading a friend's diary, the sidebar and page show `view` ({ friend, entries, currentId }) instead of `state`.
@@ -353,7 +355,7 @@
     friendSections: $('friendSections'), addFriendForm: $('addFriendForm'), friendEmail: $('friendEmail'),
     addFriendMsg: $('addFriendMsg'), shareDefaultSeg: $('shareDefaultSeg'),
     myTalk: $('myTalk'), duoMine: document.querySelector('.duo-mine'), notifBtn: $('notifBtn'), notifBadge: $('notifBadge'), notifPop: $('notifPop'),
-    notifList: $('notifList'), notifAlerts: $('notifAlerts'),
+    notifList: $('notifList'), pushRow: $('pushRow'),
   };
 
   const current = () => state.entries.find(e => e.id === state.currentId);
@@ -1764,19 +1766,6 @@
       return;
     }
     const fresh = notes.items.filter(n => !n.read && !seenNotes.has(n.id));
-    // Pop-up alerts, only for news that arrives while the tab is in the background.
-    if (notesLoadedAt && document.hidden && fresh.length && 'Notification' in window && Notification.permission === 'granted') {
-      for (const n of fresh.slice(0, 3)) {
-        try {
-          const alert = new Notification('My Little Diary', { body: noteText(n), tag: n.id });
-          alert.onclick = () => {
-            window.focus();
-            openNote(n);
-            alert.close();
-          };
-        } catch { /* some browsers only allow alerts from a service worker */ }
-      }
-    }
     // A new friend request or friend: refresh the friend list (and its badge) too.
     if (notesLoadedAt && fresh.some(n => FRIEND_NOTES.includes(n.kind))) loadFriends();
     notes.items.forEach(n => seenNotes.add(n.id));
@@ -1793,7 +1782,18 @@
         `${n.comment ? `<span class="note-quote">${escape(n.comment.length > 120 ? `${n.comment.slice(0, 120)}…` : n.comment)}</span>` : ''}` +
         `<time>${ago(n.createdAt)}</time></span></button>`).join('')
       : '<p class="note-empty">Nothing yet. Friend requests, and comments or reactions on your pages, show up here.</p>';
-    els.notifAlerts.hidden = !('Notification' in window) || Notification.permission !== 'default';
+  }
+
+  // Open a notification by id (from a tapped phone notification), marking it read.
+  async function openNoteById(id) {
+    let n = notes.items.find(x => x.id === id);
+    if (!n) {
+      await loadNotifications();
+      n = notes.items.find(x => x.id === id);
+    }
+    if (!n) return;
+    if (!n.read) Api.post('/api/notifications', { ids: [id] }).then(loadNotifications, () => {});
+    openNote(n);
   }
 
   async function openNote(n) {
@@ -1842,10 +1842,102 @@
     closeNotes();
     openNote(notes.items.find(n => n.id === b.dataset.note));
   });
-  els.notifAlerts.addEventListener('click', async () => {
-    await Notification.requestPermission();
-    renderNotes();
+
+  // ---------- Push notifications (phone / computer, even when the diary is closed) ----------
+  const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const swReady = pushSupported
+    ? navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).catch(() => null)
+    : Promise.resolve(null);
+  let pushKey = null;
+  let pushOn = false;
+  const keyBytes = k => Uint8Array.from(atob(k.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((k.length + 3) % 4)), c => c.charCodeAt(0));
+
+  async function subscribePush() {
+    const reg = await swReady;
+    if (!reg || !pushKey) throw new Error("This browser can't receive notifications.");
+    const sub = await reg.pushManager.getSubscription()
+      || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(pushKey) });
+    await Api.post('/api/push', sub.toJSON());
+    pushOn = true;
+  }
+
+  async function unsubscribePush() {
+    const sub = await (await swReady)?.pushManager.getSubscription();
+    if (sub) {
+      await Api.del('/api/push', { endpoint: sub.endpoint }).catch(() => {});
+      await sub.unsubscribe();
+    }
+    pushOn = false;
+  }
+
+  // Once allowed, keep this device registered for whoever is signed in (also after signing in again).
+  async function setupPush() {
+    if (pushSupported) {
+      try {
+        pushKey = (await Api.get('/api/push')).key;
+        if (pushKey && Notification.permission === 'granted') await subscribePush();
+      } catch { /* stays off; the button lets the person try */ }
+    }
+    renderPushRow();
+  }
+
+  function renderPushRow() {
+    let html = '';
+    if (!pushSupported) {
+      if (isIOS) html = '<p class="push-hint">To get notifications on iPhone or iPad: tap Share, then <b>Add to Home Screen</b>, open the diary from there, and turn them on here.</p>';
+    } else if (!pushKey) {
+      html = '';
+    } else if (Notification.permission === 'denied') {
+      html = '<p class="push-hint">Notifications are blocked for this site. Allow them in your browser\'s site settings, then come back here.</p>';
+    } else if (pushOn) {
+      html = '<span class="push-on">🔔 Notifications are on for this device</span><button type="button" class="link-btn" data-push="off">Turn off</button>';
+    } else {
+      html = '<button type="button" class="btn primary push-btn" data-push="on">🔔 Turn on notifications on this device</button>' +
+        '<p class="push-hint">Get a notification on this phone or computer, even when the diary is closed.</p>';
+    }
+    els.pushRow.innerHTML = html;
+    els.pushRow.hidden = !html;
+  }
+
+  els.pushRow.addEventListener('click', async e => {
+    const b = e.target.closest('[data-push]');
+    if (!b) return;
+    b.disabled = true;
+    try {
+      if (b.dataset.push === 'on') {
+        if (await Notification.requestPermission() === 'granted') {
+          await subscribePush();
+          toast('🔔 Notifications are on for this device.');
+        }
+      } else {
+        await unsubscribePush();
+        toast('Notifications are off for this device.');
+      }
+    } catch (err) {
+      toast(err.message || "Couldn't change notifications on this device.");
+    }
+    renderPushRow();
   });
+
+  // A notification link followed inside an open diary (only the #note=… part changes).
+  window.addEventListener('hashchange', () => {
+    const id = new URLSearchParams(location.hash.slice(1)).get('note');
+    if (!id) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    openNoteById(id);
+  });
+
+  // Messages from the service worker: news arrived (refresh the bell), or a notification was tapped.
+  if (pushSupported) {
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data?.type === 'notes') loadNotifications();
+      if (e.data?.type === 'open') {
+        const id = new URLSearchParams(new URL(e.data.url).hash.slice(1)).get('note');
+        if (id) openNoteById(id);
+      }
+    });
+  }
   document.addEventListener('click', e => {
     if (!els.notifPop.hidden && !e.target.closest('.notif')) closeNotes();
   });
@@ -1957,11 +2049,13 @@
   setStatus('');
   if (dirty.size) saveNow();
   window.addEventListener('resize', autosize);
-  Account.mountMenu(user, { beforeLogout: saveNow });
+  // Logging out also stops notifications on this device, so a shared device doesn't keep getting them.
+  Account.mountMenu(user, { beforeLogout: async () => { await saveNow(); await unsubscribePush().catch(() => {}); } });
   renderShareDefault();
   els.friendsBtn.hidden = false;
   els.notifBtn.hidden = false;
   loadFriends();
-  loadNotifications();
+  loadNotifications().then(() => { if (startNote) openNoteById(startNote); });
+  setupPush();
   if (moved) toast(`Moved ${moved} page${moved === 1 ? '' : 's'} from this browser into your account.`);
 })();

@@ -1334,3 +1334,11 @@ body.drawing .fab, body.drawing .tray { visibility: hidden; }
 .best-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .best-count { font-weight: 500; letter-spacing: 0; text-transform: none; }
 .star-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+/* ---------- Push notifications switch ---------- */
+.push-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; margin: 0 4px 10px; padding: 10px; border-radius: 12px; background: var(--paper); font-size: 13px; }
+.push-row[hidden] { display: none; }
+.push-row .push-btn { width: 100%; justify-content: center; }
+.push-row .link-btn { padding: 0; font-size: 12px; }
+.push-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.push-on { font-weight: 500; }

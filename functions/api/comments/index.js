@@ -2,9 +2,11 @@ import { badRequest, isoAt, json, readJson, serverError, unauthorized } from '..
 import { newId } from '../../../lib/crypto.js';
 import { isId } from '../../../lib/validate.js';
 import { MAX_COMMENTS_PER_MINUTE, cleanComment, commentRecipients, visiblePage } from '../../../lib/talk.js';
+import { pageLabel, pushNote, snippet } from '../../../lib/push.js';
 
 // Comment on a page, or reply to a comment: { owner, entry, body, parentId? }
-export async function onRequestPost({ request, env, data }) {
+export async function onRequestPost(context) {
+  const { request, env, data } = context;
   if (!data.user) return unauthorized();
   const b = await readJson(request);
   if (!isId(b?.owner) || !isId(b?.entry)) return badRequest('Bad page.');
@@ -14,7 +16,8 @@ export async function onRequestPost({ request, env, data }) {
   const me = data.user.id;
   const db = env.DB;
   try {
-    if (!(await visiblePage(db, me, b.owner, b.entry))) return json({ error: 'You can no longer see this page.' }, 404);
+    const page = await visiblePage(db, me, b.owner, b.entry);
+    if (!page) return json({ error: 'You can no longer see this page.' }, 404);
     const recent = await db.prepare('SELECT COUNT(*) AS n FROM comments WHERE author_id = ? AND created_at > ?').bind(me, isoAt(-60000)).first();
     if (recent.n >= MAX_COMMENTS_PER_MINUTE) return json({ error: 'Slow down a little, then try again.' }, 429);
 
@@ -29,11 +32,16 @@ export async function onRequestPost({ request, env, data }) {
       db.prepare('INSERT INTO comments (id, entry_owner, entry_id, author_id, parent_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .bind(id, b.owner, b.entry, me, parent ? (parent.parent_id || parent.id) : null, body, isoAt()),
     ];
-    for (const [userId, kind] of commentRecipients({ me, owner: b.owner, parentAuthor: parent?.author_id })) {
+    const notes = [...commentRecipients({ me, owner: b.owner, parentAuthor: parent?.author_id })].map(([userId, kind]) => ({ userId, kind, noteId: newId() }));
+    for (const n of notes) {
       steps.push(db.prepare('INSERT INTO notifications (id, user_id, actor_id, kind, entry_owner, entry_id, comment_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(newId(), userId, me, kind, b.owner, b.entry, id, isoAt()));
+        .bind(n.noteId, n.userId, me, n.kind, b.owner, b.entry, id, isoAt()));
     }
     await db.batch(steps);
+    for (const n of notes) {
+      const what = n.kind === 'reply' ? 'replied to your comment' : `commented on your page ${pageLabel(page.title)}`;
+      pushNote(context, n.userId, n.noteId, `${data.user.name} ${what}: ${snippet(body)}`);
+    }
     return json({ id }, 201);
   } catch (err) {
     return serverError(err, 'comment');
