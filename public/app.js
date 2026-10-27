@@ -354,7 +354,7 @@
     friendsBtn: $('friendsBtn'), friendsBadge: $('friendsBadge'), friendsDialog: $('friendsDialog'),
     friendSections: $('friendSections'), addFriendForm: $('addFriendForm'), friendEmail: $('friendEmail'),
     addFriendMsg: $('addFriendMsg'), shareDefaultSeg: $('shareDefaultSeg'),
-    myTalk: $('myTalk'), duoMine: document.querySelector('.duo-mine'), notifBtn: $('notifBtn'), notifBadge: $('notifBadge'), notifPop: $('notifPop'),
+    myTalk: $('myTalk'), viewingPresence: $('viewingPresence'), duoMine: document.querySelector('.duo-mine'), notifBtn: $('notifBtn'), notifBadge: $('notifBadge'), notifPop: $('notifPop'),
     notifList: $('notifList'), pushRow: $('pushRow'),
   };
 
@@ -1383,6 +1383,36 @@
   const activeBest = () => bests.find(b => b.friend.id === bestTab) || bests[0];
   const nameOf = f => f.name || f.email;
 
+  // Online = had the diary on screen in the last 2½ minutes (the server notes activity at most once a minute).
+  const ONLINE_FOR = 150000;
+  const isOnline = f => !!f.lastActive && Date.now() - new Date(f.lastActive) < ONLINE_FOR;
+  function when(iso) {
+    const d = new Date(iso);
+    const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const today = new Date(new Date().setHours(0, 0, 0, 0));
+    const days = Math.round((today - day) / 86400000);
+    if (days === 0) return `today ${time}`;
+    if (days === 1) return `yesterday ${time}`;
+    const opts = { day: 'numeric', month: 'short', ...(d.getFullYear() !== today.getFullYear() && { year: 'numeric' }) };
+    return `${d.toLocaleDateString(undefined, opts)}, ${time}`;
+  }
+  const presenceText = f => (isOnline(f) ? 'Online now' : f.lastActive ? `Last active ${when(f.lastActive)}` : 'Not active yet');
+  const presenceHtml = f => `<span class="presence${isOnline(f) ? ' on' : ''}">${escape(presenceText(f))}</span>`;
+  const wroteText = f => (f.lastWrote ? `✏️ Last wrote ${when(f.lastWrote)}` : "✏️ Hasn't written yet");
+
+  // Fresh online / last active times for the friends shown, without redrawing their pages.
+  function showPresence() {
+    const latest = id => friendsData.friends.find(f => f.id === id);
+    for (const b of bests) Object.assign(b.friend, latest(b.friend.id) || {});
+    els.bestPane.querySelectorAll('[data-presence]').forEach(el => {
+      const f = latest(el.dataset.presence);
+      if (f) el.innerHTML = presenceHtml(f);
+    });
+    const v = view && latest(view.friend.id);
+    els.viewingPresence.innerHTML = v ? `· ${presenceHtml(v)}` : '';
+  }
+
   function renderBest() {
     const show = bests.length > 0 && !view;
     els.bestPane.hidden = !show;
@@ -1398,7 +1428,8 @@
         `${escape(nameOf(x.friend))}${x.entries.some(e => e.date === date) ? '<span class="best-dot" title="Shared a page this day"></span>' : ''}</button>`).join('') + '</div>'
       : '';
     els.bestPane.innerHTML = tabs +
-      `<div class="best-head"><span>⭐ ${name}'s page</span><button class="link-btn" type="button" data-read-best>Read all of ${name}'s diary</button></div>` +
+      `<div class="best-head"><span>⭐ ${name}'s page</span><span data-presence="${escape(b.friend.id)}">${presenceHtml(b.friend)}</span>` +
+      `<button class="link-btn" type="button" data-read-best>Read all of ${name}'s diary</button></div>` +
       (onDay.length
         ? onDay.map(e => readonlyPageHtml(e, b.friend.id) + talkShell(b.friend.id, e.id)).join('')
         : `<div class="best-empty">${name} hasn't shared a page for ${parseDate(date).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}.</div>`);
@@ -1428,6 +1459,25 @@
       openFriend(activeBest().friend);
     }
   });
+
+  // Only the friend list (requests, presence), not the best friends' pages.
+  async function refreshFriendList() {
+    if (document.hidden) return;
+    try {
+      friendsData = await Api.get('/api/friends');
+      friendsLoadedAt = Date.now();
+    } catch {
+      return;
+    }
+    const n = friendsData.incoming.length;
+    els.friendsBadge.textContent = n;
+    els.friendsBadge.hidden = !n;
+    if (els.friendsDialog.open) renderFriendSections();
+    showPresence();
+  }
+  // Every 20 seconds while the Friends panel is open, otherwise every minute.
+  setInterval(() => { if (els.friendsDialog.open) refreshFriendList(); }, 20000);
+  setInterval(() => { if (!els.friendsDialog.open) refreshFriendList(); }, 60000);
 
   async function loadFriends() {
     try {
@@ -1481,6 +1531,7 @@
     view = { friend, entries, currentId: null };
     document.body.classList.add('viewing');
     els.viewingName.textContent = name;
+    els.viewingPresence.innerHTML = `· ${presenceHtml(friendsData.friends.find(f => f.id === friend.id) || friend)}`;
     els.viewingBar.hidden = els.friendView.hidden = false;
     els.search.value = '';
     els.search.placeholder = `Search ${name}'s pages…`;
@@ -1507,7 +1558,9 @@
   let lastFriendsHtml = '';
   function renderFriendSections() {
     const { friends, incoming, outgoing } = friendsData;
-    const person = p => `<span class="fr-who"><strong>${escape(p.name || p.email)}</strong>${p.name ? `<small>${escape(p.email)}</small>` : ''}</span>`;
+    const person = (p, status = false) => `<span class="fr-who"><strong>${escape(p.name || p.email)}</strong>` +
+      `${p.name ? `<small>${escape(p.email)}</small>` : ''}` +
+      `${status ? `<small class="fr-status">${presenceHtml(p)}<span class="wrote">${escape(wroteText(p))}</span></small>` : ''}</span>`;
     let html = '';
     if (incoming.length) {
       html += '<h3>Friend requests for you</h3>' + incoming.map(r => `<div class="fr-row">${person(r)}<span class="fr-actions">` +
@@ -1517,7 +1570,7 @@
     const bestCount = friends.filter(f => f.best).length;
     const full = bestCount >= MAX_BEST;
     html += `<h3>Your friends <span class="best-count" title="Best friends marked">(⭐ ${bestCount}/${MAX_BEST})</span></h3>` + (friends.length
-      ? friends.map(f => `<div class="fr-row">${person(f)}<span class="fr-actions">` +
+      ? friends.map(f => `<div class="fr-row">${person(f, true)}<span class="fr-actions">` +
         `<button class="star-btn${f.best ? ' on' : ''}" type="button" data-best="${escape(f.id)}" aria-pressed="${f.best}"${!f.best && full ? ' disabled' : ''} ` +
         `title="${f.best ? 'Best friend: their page shows next to yours. Tap to unmark.' : full ? `You already have ${MAX_BEST} best friends` : 'Make best friend'}">${f.best ? '⭐' : '☆'}</button>` +
         `<button class="btn" type="button" data-read="${escape(f.id)}">View diary</button>` +

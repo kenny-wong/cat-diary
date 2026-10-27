@@ -61,7 +61,7 @@
             <label class="btn" title="Restore pages from a backup file">⬆ Import<input type="file" id="importInput" accept=".json,application/json" hidden></label>
           </div>
           <button class="btn" id="logoutBtn" type="button">Log out</button>
-          <span class="version">My Little Diary v2.8.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
+          <span class="version">My Little Diary v2.9.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
         </div>
       </div>
     </div>
@@ -83,7 +83,7 @@
       </a>
       <p class="auth-note">New here? Signing in with your Google account creates your diary.</p>
       <p class="auth-msg error" id="authMsg" role="alert"></p>
-      <p class="version">v2.8.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
+      <p class="version">v2.9.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
     </div>
   </div>
 
@@ -102,7 +102,7 @@
 
     <main class="main">
       <div class="viewing-bar" id="viewingBar" hidden>
-        <span>📖 Reading <strong id="viewingName"></strong>'s diary <small>· only pages they share with friends</small></span>
+        <span>📖 Reading <strong id="viewingName"></strong>'s diary <span id="viewingPresence"></span> <small>· only pages they share with friends</small></span>
         <button class="btn primary" id="backToMine" type="button">← Back to my diary</button>
       </div>
       <div class="friend-view" id="friendView" hidden></div>

@@ -7,7 +7,7 @@ export async function onRequestGet({ env, data }) {
   try {
     const [friends, incoming, outgoing] = await env.DB.batch([
       env.DB.prepare(
-        `SELECT u.id, u.name, u.email, f.best FROM friendships f JOIN users u ON u.id = f.friend_id
+        `SELECT u.id, u.name, u.email, f.best, u.last_active_at, u.last_wrote_at FROM friendships f JOIN users u ON u.id = f.friend_id
          WHERE f.user_id = ? ORDER BY f.best DESC, u.name COLLATE NOCASE`).bind(me.id),
       env.DB.prepare(
         `SELECT r.id, u.name, u.email FROM friend_requests r JOIN users u ON u.id = r.from_user
@@ -17,7 +17,7 @@ export async function onRequestGet({ env, data }) {
          WHERE r.from_user = ? ORDER BY r.created_at DESC`).bind(me.id),
     ]);
     return json({
-      friends: friends.results.map(f => ({ ...f, best: f.best === 1 })),
+      friends: friends.results.map(({ last_active_at: lastActive, last_wrote_at: lastWrote, ...f }) => ({ ...f, best: f.best === 1, lastActive, lastWrote })),
       incoming: incoming.results,
       outgoing: outgoing.results,
     });
