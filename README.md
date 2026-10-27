@@ -6,9 +6,15 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 
 ## Getting started
 
-1. Open the link and tap **Continue with Google**. Not sure yet? Tap **Try it first** to write a page without signing in (it stays on that device), and sign in later to keep it.
+1. Open the link and tap **Continue with Google**.
 2. Your diary is ready. Write today's page, and it saves by itself.
 3. To change the name friends see, open the account menu (top right).
+
+### Try it first, without signing in
+
+Tap **✨ Try it first** on the sign-in screen, or open https://my-little-diary.pages.dev/?try. You get the whole diary: templates, stickers, photos, drawing and pictures. Your pages are kept only on that phone or computer. Friends, sharing and comments need a diary of your own.
+
+When you're ready, tap **Sign in with Google to keep them**. After signing in, the diary asks whether to add the pages you wrote while trying.
 
 ## Writing a page
 
@@ -23,7 +29,7 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 
 ## Finding old pages
 
-- The 🔥 **streak** above the calendar counts the days in a row you've written.
+- The 🔥 **streak** under **＋ New page** counts the days in a row you've written a page.
 - The **calendar** shows your mood on each day. There's also a year view and a Year › Month list.
 - **Search** finds pages by their words, and highlights them on the page you open.
 - **Export** in the account menu saves a backup, photos included, and **Import** brings it back.
@@ -43,12 +49,15 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 - **Mention a friend**: type **@** in your page or in a comment and pick a friend from the list (or type their first name, like @Chloe). They get a notification. On your own page, friends are told once the page is shared with friends, and the line under the page shows who's tagged.
 - The 🔔 **bell** shows new friend requests, mentions, comments, replies and reactions.
 - **Phone and computer notifications**: in the 🔔 panel, tap **Turn on notifications on this device**. They arrive even when the diary is closed. On iPhone or iPad, first use **Add to Home Screen**.
-- **Daily reminder**: once notifications are on, pick a time under ⏰ **Remind me to write**. You only get it on days you haven't written a page yet.
+- **Daily reminder**: once notifications are on, pick a time under ⏰ **Remind me to write** in the 🔔 panel. It comes only on days you haven't written a page yet, and tells you how long your streak is. Choose **Off** to stop it.
 
 ## Privacy
 
 - Sign-in is through Google only, so the diary never stores a password.
 - Your pages are private unless you switch them to Friends.
+- Pages written while trying the diary stay on that device until you sign in and choose to add them.
+- A picture of a page is made on your own device. Nothing is posted unless you share it.
+- No advertising or tracking cookies.
 - Details are in the [privacy policy](https://my-little-diary.pages.dev/privacy) and [terms](https://my-little-diary.pages.dev/terms).
 
 ## Running it yourself
@@ -59,4 +68,5 @@ npm run db:migrate:local
 npm run dev      # http://localhost:8790
 npm test
 npm run deploy
+npm run deploy:cron   # the small Worker that sends daily reminders
 ```
