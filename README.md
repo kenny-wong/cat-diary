@@ -27,6 +27,7 @@ Plain HTML, CSS and JavaScript in `public/` (no build step), hosted on Cloudflar
 | `public/stickers.js` | Sticker artwork (inline SVG) and sticker packs |
 | `public/account.js` | API calls, log in / sign up / password reset screen, account menu |
 | `public/app.js` | Diary logic: pages, templates, stickers, photos, calendar, saving |
+| `public/privacy.html`, `public/terms.html` | Privacy policy and terms of service (linked from the login screen and account menu) |
 | `public/_headers` | Security headers (CSP and friends) |
 | `functions/api/` | API routes: `auth/*`, `me`, `diary`, `prefs`, `entries/:id`, `photos/:id` |
 | `lib/` | Shared server code: password hashing, sessions, validation, Google sign-in, email |
