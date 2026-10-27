@@ -1141,3 +1141,25 @@ body.viewing .layout { grid-template-columns: 270px minmax(0, 1fr); }
 }
 /* Stickers and decorations may poke out of a page; never let them widen the screen. */
 .layout { overflow-x: clip; }
+
+/* ---------- Changing your name ---------- */
+.account-name-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; }
+.account-name-row strong { overflow-wrap: anywhere; }
+.account-name-row .link-btn { padding: 0; font-size: 12px; }
+.name-form { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.name-form[hidden] { display: none; }
+.name-row { display: flex; gap: 6px; }
+.name-row input {
+  flex: 1;
+  min-width: 0;
+  border: 2px solid var(--accent-soft);
+  border-radius: 10px;
+  padding: 7px 10px;
+  background: var(--paper);
+  font-size: 16px;
+  color: var(--ink);
+  outline: none;
+}
+.name-row input:focus { border-color: var(--accent); }
+.account-pop .name-row .btn { margin-top: 0; padding: 7px 14px; }
+.top-actions .account-pop .btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: none; }

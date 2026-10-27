@@ -21,7 +21,18 @@
       <div class="account">
         <button class="btn account-btn" id="accountBtn" type="button" aria-haspopup="true" aria-expanded="false" hidden><span class="account-icon" aria-hidden="true">🐱</span><span class="label"></span></button>
         <div class="account-pop" id="accountPop" hidden>
-          <strong id="accountName"></strong>
+          <div class="account-name-row">
+            <strong id="accountName"></strong>
+            <button class="link-btn" id="editNameBtn" type="button">✏️ Change name</button>
+          </div>
+          <form class="name-form" id="nameForm" hidden novalidate>
+            <label for="nameInput">Your name (your friends see it)</label>
+            <div class="name-row">
+              <input id="nameInput" maxlength="60" autocomplete="nickname">
+              <button class="btn primary" type="submit">Save</button>
+            </div>
+            <p class="sheet-msg" id="nameMsg" role="status"></p>
+          </form>
           <span class="account-email" id="accountEmail"></span>
           <div class="account-setting">
             <span id="shareDefaultLabel">New pages are</span>
@@ -35,7 +46,7 @@
             <label class="btn" title="Restore pages from a backup file">⬆ Import<input type="file" id="importInput" accept=".json,application/json" hidden></label>
           </div>
           <button class="btn" id="logoutBtn" type="button">Log out</button>
-          <span class="version">My Little Diary v2.2.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
+          <span class="version">My Little Diary v2.3.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
         </div>
       </div>
     </div>
@@ -57,7 +68,7 @@
       </a>
       <p class="auth-note">New here? Signing in with your Google account creates your diary.</p>
       <p class="auth-msg error" id="authMsg" role="alert"></p>
-      <p class="version">v2.2.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
+      <p class="version">v2.3.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
     </div>
   </div>
 

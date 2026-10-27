@@ -101,10 +101,46 @@
   function mountMenu(user, { beforeLogout }) {
     const btn = $('accountBtn');
     const pop = $('accountPop');
-    $('accountName').textContent = user.name || user.email;
+    const showName = () => {
+      $('accountName').textContent = user.name || user.email;
+      btn.querySelector('.label').textContent = user.name || user.email.split('@')[0];
+    };
+    showName();
     $('accountEmail').textContent = user.email;
-    btn.querySelector('.label').textContent = user.name || user.email.split('@')[0];
     btn.hidden = false;
+
+    // Changing your name
+    const form = $('nameForm');
+    const input = $('nameInput');
+    const msg = (text, isError = false) => {
+      $('nameMsg').textContent = text;
+      $('nameMsg').classList.toggle('error', isError);
+    };
+    $('editNameBtn').addEventListener('click', () => {
+      form.hidden = !form.hidden;
+      msg('');
+      if (!form.hidden) {
+        input.value = user.name;
+        input.focus();
+        input.select();
+      }
+    });
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) return msg('Please enter a name.', true);
+      if (name === user.name) return (form.hidden = true);
+      msg('Saving…');
+      try {
+        user.name = (await Api.put('/api/me', { name })).user.name;
+        if (currentUser) currentUser.name = user.name;
+        showName();
+        form.hidden = true;
+        msg('');
+      } catch (err) {
+        msg(err.message, true);
+      }
+    });
     btn.addEventListener('click', () => {
       pop.hidden = !pop.hidden;
       btn.setAttribute('aria-expanded', !pop.hidden);
