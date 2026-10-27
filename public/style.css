@@ -997,3 +997,4 @@ body.auth-open { overflow: hidden; }
   .account-btn .label { display: none; }
   .auth-card { padding: 22px 18px 14px; }
 }
+.version a { color: inherit; }
