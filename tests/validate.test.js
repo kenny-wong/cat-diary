@@ -9,6 +9,9 @@ test('names are tidied', () => {
 
 test('ids are short alphanumerics', () => {
   assert.equal(isId('lq3k2abc12'), true);
+  assert.equal(isId('Ab-3_xZ9k-Q_mN2p'), true); // the first accounts' ids
+  assert.equal(isId('a/b'), false);
+  assert.equal(isId('a b'), false);
   assert.equal(isId('../etc'), false);
   assert.equal(isId(''), false);
 });
