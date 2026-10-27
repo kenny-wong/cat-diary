@@ -2,6 +2,7 @@ import { cookie, getCookie } from '../../../../lib/http.js';
 import { newId, timingSafeEqual } from '../../../../lib/crypto.js';
 import { GOOGLE_STATE_COOKIE, exchangeCode, googleEnabled, readIdToken, redirectUri } from '../../../../lib/google.js';
 import { createSession } from '../../../../lib/session.js';
+import { friendNote } from '../../../../lib/friends.js';
 import { cleanName } from '../../../../lib/validate.js';
 
 function redirect(request, hash, setCookies = []) {
@@ -35,6 +36,9 @@ export async function onRequestGet({ request, env }) {
       user = { id: newId() };
       await db.prepare('INSERT INTO users (id, email, name, google_sub) VALUES (?, ?, ?, ?)')
         .bind(user.id, g.email, cleanName(g.name) || g.email.split('@')[0], g.sub).run();
+      // Friend requests sent before this person had a diary: tell them now.
+      const { results: waiting } = await db.prepare('SELECT DISTINCT from_user FROM friend_requests WHERE to_email = ?').bind(g.email).all();
+      if (waiting.length) await db.batch(waiting.map(r => friendNote(db, user.id, r.from_user, 'friend_request')));
     }
     return redirect(request, '', [await createSession(db, user.id)]);
   } catch (err) {

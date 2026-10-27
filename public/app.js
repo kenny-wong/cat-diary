@@ -429,7 +429,7 @@
     if (document.hidden && (dirty.size || prefsDirty)) saveNow();
     // Coming back to the tab: pick up new friend requests and the best friend's latest pages.
     if (!document.hidden && Date.now() - friendsLoadedAt > 60000) loadFriends();
-    if (!document.hidden && Date.now() - notesLoadedAt > 20000) loadNotifications();
+    if (!document.hidden && Date.now() - notesLoadedAt > 3000) loadNotifications();
   });
 
   let toastTimer;
@@ -1501,6 +1501,7 @@
   $('backToMine').addEventListener('click', closeFriend);
 
   // ---------- Friends dialog ----------
+  let lastFriendsHtml = '';
   function renderFriendSections() {
     const { friends, incoming, outgoing } = friendsData;
     const person = p => `<span class="fr-who"><strong>${escape(p.name || p.email)}</strong>${p.name ? `<small>${escape(p.email)}</small>` : ''}</span>`;
@@ -1525,7 +1526,8 @@
     }
     html += `<p class="fr-note">⭐ Mark up to ${MAX_BEST} best friends: their pages for the same day show next to yours (with tabs when there are several). ` +
       'Friends only ever see pages you switch to 👫 Friends.</p>';
-    els.friendSections.innerHTML = html;
+    // Only redraw when something changed, so a button isn't replaced just as it's tapped.
+    if (html !== lastFriendsHtml) els.friendSections.innerHTML = lastFriendsHtml = html;
   }
 
   function friendMessage(text, isError = false) {
@@ -1533,12 +1535,13 @@
     els.addFriendMsg.classList.toggle('error', isError);
   }
 
-  els.friendsBtn.addEventListener('click', () => {
+  function openFriendsPanel() {
     friendMessage('');
     renderFriendSections();
-    els.friendsDialog.showModal();
+    if (!els.friendsDialog.open) els.friendsDialog.showModal();
     loadFriends();
-  });
+  }
+  els.friendsBtn.addEventListener('click', openFriendsPanel);
   $('friendsClose').addEventListener('click', () => els.friendsDialog.close());
   els.friendsDialog.addEventListener('click', e => {
     if (e.target === els.friendsDialog) els.friendsDialog.close(); // a click on the backdrop
@@ -1737,7 +1740,11 @@
   const seenNotes = new Set();
 
   const pageName = n => (n.title ? `“${n.title}”` : 'a page');
+  const FRIEND_NOTES = ['friend_request', 'friend_accept'];
+  const NOTE_ICONS = { comment: '💬', reply: '↩️', friend_request: '👋', friend_accept: '🤝' };
   function noteText(n) {
+    if (n.kind === 'friend_request') return `${n.actorName} sent you a friend request`;
+    if (n.kind === 'friend_accept') return `${n.actorName} accepted your friend request. You're friends now!`;
     if (n.kind === 'reply') return `${n.actorName} replied to your comment on ${n.owner === user.id ? 'your' : `${n.ownerName}'s`} page ${pageName(n)}`;
     if (n.kind === 'reaction') return `${n.actorName} reacted ${n.emoji} to your page ${pageName(n)}`;
     return `${n.actorName} commented on your page ${pageName(n)}`;
@@ -1770,6 +1777,8 @@
         } catch { /* some browsers only allow alerts from a service worker */ }
       }
     }
+    // A new friend request or friend: refresh the friend list (and its badge) too.
+    if (notesLoadedAt && fresh.some(n => FRIEND_NOTES.includes(n.kind))) loadFriends();
     notes.items.forEach(n => seenNotes.add(n.id));
     notesLoadedAt = Date.now();
     showUnread();
@@ -1779,15 +1788,16 @@
   function renderNotes() {
     els.notifList.innerHTML = notes.items.length
       ? notes.items.map(n => `<button type="button" class="note${n.read ? '' : ' unread'}" data-note="${escape(n.id)}">` +
-        `<span class="note-icon" aria-hidden="true">${n.kind === 'reaction' ? escape(n.emoji || '❤️') : n.kind === 'reply' ? '↩️' : '💬'}</span>` +
+        `<span class="note-icon" aria-hidden="true">${n.kind === 'reaction' ? escape(n.emoji || '❤️') : NOTE_ICONS[n.kind] || '💬'}</span>` +
         `<span class="note-main"><span>${escape(noteText(n))}</span>` +
         `${n.comment ? `<span class="note-quote">${escape(n.comment.length > 120 ? `${n.comment.slice(0, 120)}…` : n.comment)}</span>` : ''}` +
         `<time>${ago(n.createdAt)}</time></span></button>`).join('')
-      : '<p class="note-empty">Nothing yet. When friends comment on or react to your pages, it shows up here.</p>';
+      : '<p class="note-empty">Nothing yet. Friend requests, and comments or reactions on your pages, show up here.</p>';
     els.notifAlerts.hidden = !('Notification' in window) || Notification.permission !== 'default';
   }
 
   async function openNote(n) {
+    if (FRIEND_NOTES.includes(n.kind)) return openFriendsPanel();
     if (n.owner === user.id) {
       closeFriend();
       if (!state.entries.some(e => e.id === n.entryId)) return toast('That page was torn out.');
@@ -1839,8 +1849,10 @@
   document.addEventListener('click', e => {
     if (!els.notifPop.hidden && !e.target.closest('.notif')) closeNotes();
   });
-  // Check for news every minute while the diary is on screen.
-  setInterval(() => { if (!document.hidden) loadNotifications(); }, 60000);
+  // Check for news every 15 seconds while the diary is on screen, and straight away when you come back to it.
+  const NOTES_EVERY = 15000;
+  setInterval(() => { if (!document.hidden) loadNotifications(); }, NOTES_EVERY);
+  window.addEventListener('focus', () => { if (Date.now() - notesLoadedAt > 3000) loadNotifications(); });
 
   // ---------- Drawer (small screens) ----------
   function setDrawer(open) {

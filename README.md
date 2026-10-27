@@ -11,7 +11,7 @@ Live at **https://my-little-diary.pages.dev**
 - **Best friends**: mark up to 4 friends with ⭐ (the Friends panel shows the count, e.g. 1/4). Their pages for the same day show next to yours (your page on the left, or on top on narrow screens); with 2–4 best friends, tabs switch between them.
 - **Read a friend's diary**: browse a friend's calendar, seeing only the pages they share with friends.
 - **Comments & reactions**: comment on shared pages, reply to comments, and react with emoji. You can delete your own comments, and any comment on your own pages.
-- **Notifications**: 🔔 bell with an unread badge for comments, replies and reactions (checked every minute while the diary is open, with optional pop-up alerts while the tab is in the background).
+- **Notifications**: 🔔 bell with an unread badge for friend requests, accepted requests, comments, replies and reactions (checked every 15 seconds while the diary is open and straight away when you return to it, with optional pop-up alerts while the tab is in the background).
 - **Drawing**: ✏️ Draw in the sticker box. Doodle on the page; Done turns the drawing into a sticker you can move, resize and spin.
 - **Sports**: pick one or more sports for the day next to the weather (badminton, football, basketball, volleyball and more).
 - **Templates**: dress each page in Cat Café, Sakura, Seaside, Forest, Starry Night or Vintage, each with its own colours, paper style and decorations.

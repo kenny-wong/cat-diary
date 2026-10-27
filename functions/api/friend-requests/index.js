@@ -1,7 +1,7 @@
 import { badRequest, json, readJson, serverError, unauthorized } from '../../../lib/http.js';
 import { newId } from '../../../lib/crypto.js';
 import { normalizeEmail } from '../../../lib/validate.js';
-import { MAX_PENDING_REQUESTS, areFriends, makeFriends } from '../../../lib/friends.js';
+import { MAX_PENDING_REQUESTS, areFriends, friendNote, makeFriends } from '../../../lib/friends.js';
 
 // Send a friend request to a Google email. It waits there until that person signs in and accepts.
 // If they had already sent you one, you simply become friends.
@@ -21,9 +21,15 @@ export async function onRequestPost({ request, env, data }) {
         return json({ status: 'friends', name: target.name });
       }
     }
+    if (await env.DB.prepare('SELECT 1 FROM friend_requests WHERE from_user = ? AND to_email = ?').bind(me.id, email).first()) {
+      return json({ status: 'sent' }, 201); // already waiting: no second notification
+    }
     const pending = await env.DB.prepare('SELECT COUNT(*) AS n FROM friend_requests WHERE from_user = ?').bind(me.id).first();
     if (pending.n >= MAX_PENDING_REQUESTS) return json({ error: 'You have lots of requests waiting. Cancel some first.' }, 429);
-    await env.DB.prepare('INSERT OR IGNORE INTO friend_requests (id, from_user, to_email) VALUES (?, ?, ?)').bind(newId(), me.id, email).run();
+    const steps = [env.DB.prepare('INSERT INTO friend_requests (id, from_user, to_email) VALUES (?, ?, ?)').bind(newId(), me.id, email)];
+    // Someone without an account yet is told when they first sign in (see the Google callback).
+    if (target) steps.push(friendNote(env.DB, target.id, me.id, 'friend_request'));
+    await env.DB.batch(steps);
     return json({ status: 'sent' }, 201);
   } catch (err) {
     return serverError(err, 'friend request');
