@@ -609,12 +609,16 @@ mark.found { color: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   max-width: 780px;
   margin: 14px auto 0;
   padding: 0 6px;
   font-size: 14px;
   color: var(--muted);
 }
+
+.foot-info { display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.page-foot .link-btn { flex: none; white-space: nowrap; }
 
 /* ---------- Template decorations ---------- */
 .page-deco { position: absolute; inset: 0; z-index: 1; pointer-events: none; }

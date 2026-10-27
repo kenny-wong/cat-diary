@@ -374,7 +374,7 @@
     photoBtn: $('photoBtn'), photoInput: $('photoInput'),
     trayTabs: $('trayTabs'), trayGrid: $('trayGrid'), tray: $('tray'), fab: $('stickerFab'), trayClose: $('trayClose'),
     sidebar: $('sidebar'), scrim: $('scrim'), menuBtn: $('menuBtn'),
-    saveStatus: $('saveStatus'), wordCount: $('wordCount'), toast: $('toast'),
+    saveStatus: $('saveStatus'), wordCount: $('wordCount'), editedAt: $('editedAt'), toast: $('toast'),
     shareBtn: $('shareBtn'), layout: document.querySelector('.layout'), bestPane: $('bestPane'),
     friendView: $('friendView'), viewingBar: $('viewingBar'), viewingName: $('viewingName'),
     friendsBtn: $('friendsBtn'), friendsBadge: $('friendsBadge'), friendsDialog: $('friendsDialog'),
@@ -436,6 +436,7 @@
     if (entry) {
       entry.updatedAt = Date.now();
       dirty.add(entry.id);
+      if (entry === current()) els.editedAt.textContent = editedText(entry);
     }
     setStatus('saving');
     schedule(600);
@@ -526,6 +527,9 @@
     els.body.style.height = els.body.scrollHeight + 'px';
   }
 
+  // When a page was last changed (any edit: words, stickers, mood…). A page nobody has touched yet "started".
+  const editedText = e => `✏️ ${e.updatedAt - e.createdAt < 2000 ? 'Started' : 'Last edited'} ${when(e.updatedAt)}`;
+
   function updateWordCount(entry) {
     const cjkRe = /[぀-ヿ㐀-鿿豈-﫿가-힯]/g;
     const text = `${entry.title} ${entry.body}`;
@@ -547,6 +551,7 @@
     autosize();
     renderStickers();
     updateWordCount(entry);
+    els.editedAt.textContent = editedText(entry);
     renderBest();
     els.myTalk.dataset.owner = user.id;
     els.myTalk.dataset.entry = entry.id;
@@ -1476,7 +1481,8 @@
       `${tag('sports', SPORTS, entry.sports)}${tag('activities', ACTIVITIES, entry.activities)}</div></div>` +
       `<h2 class="entry-title">${escape(entry.title || 'Untitled page')}</h2>` +
       `<div class="entry-body">${mentionHtml(entry.body)}</div>` +
-      `<div class="sticker-layer">${stickers}</div></article></div>`;
+      `<div class="sticker-layer">${stickers}</div></article>` +
+      `<div class="page-foot"><span class="foot-info">${escape(editedText(entry))}</span></div></div>`;
   }
 
   // Missing friend photos show a note instead of a broken image.

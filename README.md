@@ -13,6 +13,7 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 ## Writing a page
 
 - **Mood and weather**: pick them at the top of each page.
+- Under each page you can see when it was **last edited** (on friends' pages too).
 - **Sports and activities**: next to the weather, pick what you played and what you did that day (work, study, a tournament, church, the park, shopping, travel and more).
 - **Templates**: dress the page in Cat Café, Sakura, Seaside, Forest, Starry Night or Vintage.
 - **Stickers**: cats, washi tapes, labels and emoji. Drag to move, pull the corner dot to resize or spin, and tap × to remove.
