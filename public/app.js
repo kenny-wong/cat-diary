@@ -551,6 +551,89 @@
     els.myTalk.dataset.owner = user.id;
     els.myTalk.dataset.entry = entry.id;
     loadTalk(els.myTalk);
+    showFound();
+  }
+
+  // ---------- Search highlights ----------
+  // While the search box has text, its matches are marked on the page that's open. The title and text
+  // boxes can't colour words, so a copy of their text with the matches marked sits right behind each box
+  // (the boxes are see-through). A friend's read-only page gets <mark>s in its text directly.
+  const searchQuery = () => els.search.value.trim().toLowerCase();
+  const findCopies = new Map(); // text box -> its marked copy
+
+  function findSpans(text, q) {
+    const spans = [];
+    const lower = text.toLowerCase();
+    for (let i = lower.indexOf(q); q && i !== -1; i = lower.indexOf(q, i + q.length)) spans.push([i, i + q.length]);
+    return spans;
+  }
+
+  function showFound() {
+    const q = searchQuery();
+    for (const field of [els.title, els.body]) {
+      let copy = findCopies.get(field);
+      const spans = q && !view ? findSpans(field.value, q) : [];
+      if (!spans.length) {
+        if (copy) copy.hidden = true;
+        continue;
+      }
+      if (!copy) {
+        copy = document.createElement('div');
+        copy.className = 'find-copy';
+        copy.setAttribute('aria-hidden', 'true');
+        field.before(copy);
+        findCopies.set(field, copy);
+      }
+      let html = '';
+      let at = 0;
+      for (const [s, e] of spans) {
+        html += `${escape(field.value.slice(at, s))}<mark>${escape(field.value.slice(s, e))}</mark>`;
+        at = e;
+      }
+      copy.innerHTML = html + escape(field.value.slice(at));
+      const cs = getComputedStyle(field);
+      for (const p of ['boxSizing', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth',
+        'borderBottomWidth', 'borderLeftWidth', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight',
+        'wordSpacing', 'textIndent', 'tabSize', 'overflowWrap', 'wordBreak']) copy.style[p] = cs[p];
+      Object.assign(copy.style, {
+        top: `${field.offsetTop}px`, left: `${field.offsetLeft}px`, width: `${field.offsetWidth}px`, height: `${field.offsetHeight}px`,
+        whiteSpace: field.tagName === 'TEXTAREA' ? 'pre-wrap' : 'pre',
+      });
+      copy.hidden = false;
+      copy.scrollLeft = field.scrollLeft;
+    }
+    // A friend's page: mark the text itself (it is already escaped markup; only text nodes change).
+    const ro = view && els.friendView.querySelector('.ro-page');
+    if (ro) {
+      ro.querySelectorAll('mark.found').forEach(m => m.replaceWith(m.textContent));
+      ro.normalize();
+      if (q) {
+        for (const box of ro.querySelectorAll('.entry-title, .entry-body')) {
+          const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+          const nodes = [];
+          while (walker.nextNode()) nodes.push(walker.currentNode);
+          for (const node of nodes) {
+            const spans = findSpans(node.data, q);
+            for (const [s, e] of spans.reverse()) {
+              const hit = node.splitText(s);
+              hit.splitText(e - s);
+              const mark = document.createElement('mark');
+              mark.className = 'found';
+              hit.replaceWith(mark);
+              mark.append(hit);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // After opening a page from the search results: bring the first match into view.
+  function revealFound() {
+    if (!searchQuery()) return;
+    const first = view ? els.friendView.querySelector('mark.found')
+      : [els.title, els.body].map(f => findCopies.get(f)).find(c => c && !c.hidden)?.querySelector('mark');
+    if (first) setTimeout(() => first.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
   }
 
   // ---------- Sidebar: calendar, year > month folders, search ----------
@@ -1144,6 +1227,7 @@
 
   // ---------- Entry editing ----------
   els.title.addEventListener('input', () => {
+    if (searchQuery()) requestAnimationFrame(showFound);
     const entry = current();
     entry.title = els.title.value;
     updateWordCount(entry);
@@ -1152,6 +1236,7 @@
   });
 
   els.body.addEventListener('input', () => {
+    if (searchQuery()) requestAnimationFrame(showFound);
     const entry = current();
     entry.body = els.body.value;
     autosize();
@@ -1279,7 +1364,10 @@
   els.list.addEventListener('click', e => {
     const t = e.target.closest('button');
     if (!t) return;
-    if (t.classList.contains('entry-item')) return openEntry(t.dataset.id, { fromCalendar: true });
+    if (t.classList.contains('entry-item')) {
+      openEntry(t.dataset.id, { fromCalendar: true });
+      return revealFound();
+    }
     if (t.dataset.nav) {
       const step = Number(t.dataset.nav);
       if (cal.zoom === 'year') cal.y += step;
@@ -1352,7 +1440,10 @@
     }
   });
 
-  els.search.addEventListener('input', renderList);
+  els.search.addEventListener('input', () => {
+    renderList();
+    showFound();
+  });
 
   // ---------- Friends ----------
   // A friend's page, read-only. Everything in it comes from someone else, so every text is escaped
@@ -1534,6 +1625,7 @@
     applyTheme(entry);
     els.friendView.innerHTML = readonlyPageHtml(entry, view.friend.id) + talkShell(view.friend.id, entry.id);
     loadTalk(els.friendView.querySelector('.talk'));
+    showFound();
   }
 
   // entryId (optional) opens that page, e.g. from a notification. Resolves true once the diary is open.
@@ -2023,7 +2115,7 @@
     if (n.kind === 'friend_request') return `${n.actorName} sent you a friend request`;
     if (n.kind === 'friend_accept') return `${n.actorName} accepted your friend request. You're friends now!`;
     if (n.kind === 'reply') return `${n.actorName} replied to your comment on ${n.owner === user.id ? 'your' : `${n.ownerName}'s`} page${pageName(n)}`;
-    if (n.kind === 'tag') return `${n.actorName} mentioned you on their page${pageName(n)}`;
+    if (n.kind === 'tag') return `${n.actorName} has mentioned you on ${n.title ? `the page “${n.title}”` : 'a page'}`;
     if (n.kind === 'mention') {
       return `${n.actorName} mentioned you in a comment on ${n.owner === user.id ? 'your' : n.owner === n.actor ? 'their' : `${n.ownerName}'s`} page${pageName(n)}`;
     }
@@ -2334,7 +2426,10 @@
   renderList();
   setStatus('');
   if (dirty.size) saveNow();
-  window.addEventListener('resize', autosize);
+  window.addEventListener('resize', () => {
+    autosize();
+    showFound();
+  });
   // Logging out also stops notifications on this device, so a shared device doesn't keep getting them.
   Account.mountMenu(user, { beforeLogout: async () => { await saveNow(); await unsubscribePush().catch(() => {}); } });
   renderShareDefault();

@@ -590,6 +590,21 @@ button, input, textarea { font: inherit; color: inherit; }
 .entry-title::placeholder,
 .entry-body::placeholder { color: var(--muted); opacity: .75; }
 
+/* Search matches: a copy of the text box's text sits behind it, with only the marks visible. */
+.find-copy {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  border-style: solid;
+  border-color: transparent;
+  color: transparent;
+  pointer-events: none;
+}
+.find-copy[hidden] { display: none; }
+.find-copy mark, mark.found { border-radius: 4px; background: rgba(255, 205, 40, .55); }
+.find-copy mark { color: transparent; }
+mark.found { color: inherit; }
+
 .page-foot {
   display: flex;
   align-items: center;

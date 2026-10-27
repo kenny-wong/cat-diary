@@ -22,7 +22,7 @@ A cute, decorated online diary. Everyone gets their own private diary, and it fo
 ## Finding old pages
 
 - The **calendar** shows your mood on each day. There's also a year view and a Year › Month list.
-- **Search** finds pages by their words.
+- **Search** finds pages by their words, and highlights them on the page you open.
 - **Export** in the account menu saves a backup, photos included, and **Import** brings it back.
 
 ## Friends

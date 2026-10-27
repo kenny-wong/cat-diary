@@ -23,7 +23,8 @@ ${str(entry.body)}`;
     db.prepare("INSERT INTO notifications (id, user_id, actor_id, kind, entry_owner, entry_id, created_at) VALUES (?, ?, ?, 'tag', ?, ?, ?)")
       .bind(f.noteId, f.id, me.id, me.id, entryId, isoAt()),
   ]));
-  for (const f of fresh) pushNote(context, f.id, f.noteId, `${me.name} mentioned you on their page${pageLabel(str(entry.title))}`);
+  const where = str(entry.title) ? `the page${pageLabel(str(entry.title))}` : 'a page';
+  for (const f of fresh) pushNote(context, f.id, f.noteId, `${me.name} has mentioned you on ${where}`);
   return fresh.map(f => f.name);
 }
 
