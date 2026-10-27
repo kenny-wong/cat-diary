@@ -954,7 +954,6 @@ body.auth-open { overflow: hidden; }
 .auth-brand { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 22px; font-weight: 600; }
 .auth-title { margin: 4px 0 0; font-family: var(--font-write); font-size: 30px; font-weight: 400; text-align: center; }
 .auth-sub { margin: -6px 0 0; font-size: 14px; color: var(--muted); text-align: center; }
-.auth-tabs[hidden] { display: none; }
 .google-btn {
   justify-content: center;
   gap: 10px;
@@ -965,32 +964,13 @@ body.auth-open { overflow: hidden; }
   text-decoration: none;
   font-size: 15px;
 }
-.google-btn[hidden] { display: none; }
-.auth-or { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
-.auth-or::before, .auth-or::after { content: ''; flex: 1; border-top: 2px dashed var(--line); }
-.auth-or[hidden] { display: none; }
-.auth-form { display: flex; flex-direction: column; gap: 12px; }
-.field { display: flex; flex-direction: column; gap: 5px; font-size: 14px; font-weight: 500; }
-.field[hidden] { display: none; }
-.field input {
-  width: 100%;
-  border: 2px solid var(--accent-soft);
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: var(--surface);
-  font-size: 16px;
-  font-weight: 400;
-  outline: none;
-}
-.field input:focus { border-color: var(--accent); }
-.auth-msg { margin: 0; min-height: 1em; font-size: 14px; }
+.google-btn:hover { border-color: var(--accent); }
+.auth-about { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.auth-about li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-radius: 12px; background: var(--surface); }
+.auth-about span { font-family: var(--font-emoji); }
+.auth-note { margin: -4px 0 0; font-size: 13px; color: var(--muted); text-align: center; }
+.auth-msg { margin: 0; font-size: 14px; color: #d0475e; text-align: center; }
 .auth-msg:empty { display: none; }
-.auth-msg.error { color: #d0475e; }
-.auth-msg.ok { color: var(--ink); background: var(--accent-soft); padding: 10px 12px; border-radius: 12px; }
-.auth-submit { justify-content: center; padding: 12px 16px; font-size: 16px; }
-.auth-submit:disabled { opacity: .6; cursor: wait; }
-.auth-links { display: flex; justify-content: center; }
-.auth-links .link-btn[hidden] { display: none; }
 .auth-card .version { margin: 0; text-align: center; }
 
 @media (max-width: 600px) {

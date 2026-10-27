@@ -1,18 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkEntry, cleanName, cleanPrefs, isId, normalizeEmail, passwordProblem, sniffImage, MAX_PHOTO_BYTES } from '../lib/validate.js';
-
-test('emails are trimmed, lower-cased and checked', () => {
-  assert.equal(normalizeEmail('  Kitty@Example.COM '), 'kitty@example.com');
-  assert.equal(normalizeEmail('not-an-email'), null);
-  assert.equal(normalizeEmail(42), null);
-});
-
-test('passwords need 8 to 200 characters', () => {
-  assert.ok(passwordProblem('short'));
-  assert.equal(passwordProblem('long enough'), null);
-  assert.ok(passwordProblem('x'.repeat(201)));
-});
+import { checkEntry, cleanName, cleanPrefs, isId, sniffImage, MAX_PHOTO_BYTES } from '../lib/validate.js';
 
 test('names are tidied', () => {
   assert.equal(cleanName('  Mochi   the  cat '), 'Mochi the cat');

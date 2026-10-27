@@ -1,12 +1,12 @@
 # My Little Diary 🐾
 
-A cute, decorated online diary. Everyone gets their own private diary: sign up with email and password or continue with Google, and your pages follow you to any phone or computer.
+A cute, decorated online diary. Everyone gets their own private diary: sign in with a Google account, and your pages follow you to any phone or computer.
 
 Live at **https://my-little-diary.pages.dev**
 
 ## Features
 
-- **Accounts**: sign up with email and password, or continue with Google. Each person's pages and photos are private to them.
+- **Accounts**: "Continue with Google" is the only way in. A first sign-in creates the diary. Each person's pages and photos are private to them.
 - **Templates**: dress each page in Cat Café, Sakura, Seaside, Forest, Starry Night or Vintage, each with its own colours, paper style and decorations.
 - **Stickers**: hand-drawn cat stickers, washi tapes, labels and emoji. Drag to move, pull the corner dot to resize and spin, × to peel off.
 - **Photos**: add photos from the sticker box, or drop / paste them onto the page. They are shrunk to under 1.5 MB before uploading. Choose a polaroid, taped, round or cut-out frame.
@@ -25,20 +25,20 @@ Plain HTML, CSS and JavaScript in `public/` (no build step), hosted on Cloudflar
 | `public/index.html` | Page layout, login screen |
 | `public/style.css` | Templates, page, sticker and login styling |
 | `public/stickers.js` | Sticker artwork (inline SVG) and sticker packs |
-| `public/account.js` | API calls, log in / sign up / password reset screen, account menu |
+| `public/account.js` | API calls, "Continue with Google" screen, account menu |
 | `public/app.js` | Diary logic: pages, templates, stickers, photos, calendar, saving |
 | `public/privacy.html`, `public/terms.html` | Privacy policy and terms of service (linked from the login screen and account menu) |
 | `public/_headers` | Security headers (CSP and friends) |
-| `functions/api/` | API routes: `auth/*`, `me`, `diary`, `prefs`, `entries/:id`, `photos/:id` |
-| `lib/` | Shared server code: password hashing, sessions, validation, Google sign-in, email |
+| `functions/api/` | API routes: `auth/google`, `auth/google/callback`, `auth/logout`, `me`, `diary`, `prefs`, `entries/:id`, `photos/:id` |
+| `lib/` | Shared server code: tokens, sessions, validation, Google sign-in |
 | `migrations/` | D1 database schema |
 | `tests/` | Unit tests (`npm test`) |
 
 ### Security notes
 
-- Passwords are hashed with PBKDF2-SHA256 (100,000 iterations, random salt).
+- No passwords are stored: Google proves who each person is. The id_token's issuer, audience, expiry and verified email are checked.
 - Sessions are random tokens in an `HttpOnly; Secure; SameSite=Lax` cookie. Only their SHA-256 is stored.
-- Cross-site writes are blocked by an `Origin` check. Logins are rate-limited per email.
+- Cross-site writes are blocked by an `Origin` check, and the Google sign-in uses a `state` cookie against forged callbacks.
 - Every query is scoped to the logged-in user, and photos are served only to their owner.
 
 ## Running locally
@@ -50,21 +50,22 @@ npm run dev          # http://localhost:8790
 npm test
 ```
 
-## Settings (Cloudflare Pages → Settings → Variables and Secrets)
+## Settings (Cloudflare Pages → my-little-diary → Settings → Variables and Secrets)
 
 | Name | For |
 | --- | --- |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | "Continue with Google". The button appears once both are set. |
-| `RESEND_API_KEY`, `MAIL_FROM` | Password reset emails via [Resend](https://resend.com). "Forgot password?" appears once both are set. `MAIL_FROM` must be on a domain verified in Resend, e.g. `My Little Diary <diary@example.com>`. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | "Continue with Google". Both are set as encrypted secrets. Without them nobody can sign in. |
 
-For local development put the same names in `.dev.vars` (never committed).
+### Google sign-in setup (done once)
 
-### Setting up Google sign-in
+In Google Cloud Console (project "My Little Diary" → Google Auth Platform):
 
-1. Go to https://console.cloud.google.com/, create a project, then **APIs & Services → OAuth consent screen**: choose *External*, fill in the app name and your email, and publish the app.
-2. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type *Web application*.
-3. Under **Authorized redirect URIs** add `https://my-little-diary.pages.dev/api/auth/google/callback` (and `http://localhost:8790/api/auth/google/callback` for local testing).
-4. Put the client ID and secret into the Cloudflare settings above, then redeploy.
+1. **Branding**: app name, support email, home page `https://my-little-diary.pages.dev`, privacy `…/privacy`, terms `…/terms`, authorised domain `my-little-diary.pages.dev`.
+2. **Audience**: External, published (In production).
+3. **Clients**: a Web application client with redirect URI `https://my-little-diary.pages.dev/api/auth/google/callback`.
+4. Put the client ID and secret into the Cloudflare settings above (`wrangler pages secret put … --project-name my-little-diary`), then redeploy.
+
+Local dev can't complete a Google sign-in (the localhost callback isn't registered), so local testing uses a session row inserted into the local database.
 
 ## Deploying
 

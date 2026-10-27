@@ -10,7 +10,7 @@ function redirect(request, hash, setCookies = []) {
   return new Response(null, { status: 302, headers });
 }
 
-// Google sends the browser back here after sign-in.
+// Google sends the browser back here after sign-in. A first sign-in creates the diary.
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   if (url.searchParams.get('error')) return redirect(request, ''); // the user cancelled
@@ -25,22 +25,16 @@ export async function onRequestGet({ request, env }) {
     const db = env.DB;
 
     let user = await db.prepare('SELECT id FROM users WHERE google_sub = ?').bind(g.sub).first();
-    if (!user) {
-      const byEmail = await db.prepare('SELECT id, name, email_verified FROM users WHERE email = ?').bind(g.email).first();
-      if (byEmail && byEmail.email_verified) {
-        await db.prepare('UPDATE users SET google_sub = ? WHERE id = ?').bind(g.sub, byEmail.id).run();
-      } else if (byEmail) {
-        // Nobody ever proved they own this email, so whoever set its password could be someone else.
-        // Google has now proved it: the Google user takes the account over, and the old password and sessions stop working.
-        await db.batch([
-          db.prepare('UPDATE users SET google_sub = ?, email_verified = 1, password_hash = NULL WHERE id = ?').bind(g.sub, byEmail.id),
-          db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(byEmail.id),
-        ]);
-      } else {
-        await db.prepare('INSERT INTO users (id, email, name, google_sub, email_verified) VALUES (?, ?, ?, ?, 1)')
-          .bind(newId(), g.email, cleanName(g.name) || g.email.split('@')[0], g.sub).run();
-      }
-      user = await db.prepare('SELECT id FROM users WHERE google_sub = ?').bind(g.sub).first();
+    if (user) {
+      // Follow Google email changes, unless another diary already uses that address.
+      await db.prepare('UPDATE users SET email = ?1 WHERE id = ?2 AND NOT EXISTS (SELECT 1 FROM users WHERE email = ?1 AND id != ?2)')
+        .bind(g.email, user.id).run();
+    } else {
+      // A different Google account already has this email (Google lets addresses be reused): don't hand that diary over.
+      if (await db.prepare('SELECT 1 FROM users WHERE email = ?').bind(g.email).first()) return redirect(request, '#auth-error=taken');
+      user = { id: newId() };
+      await db.prepare('INSERT INTO users (id, email, name, google_sub) VALUES (?, ?, ?, ?)')
+        .bind(user.id, g.email, cleanName(g.name) || g.email.split('@')[0], g.sub).run();
     }
     return redirect(request, '', [await createSession(db, user.id)]);
   } catch (err) {
