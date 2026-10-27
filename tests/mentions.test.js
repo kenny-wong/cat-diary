@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_MENTIONS, findMentions, mentionCounts, newlyMentioned, scanMentions } from '../lib/mentions.js';
+import { MAX_MENTIONS, findMentions, mentionChanges, mentionCounts, scanMentions } from '../lib/mentions.js';
 
 const people = [{ id: 'k', name: 'Kenny Wong' }, { id: 'uk', name: 'Kenny Wong UK' }, { id: 'c', name: 'Chloe' }, { id: 'n', name: '' }];
 
@@ -54,12 +54,19 @@ test('spans point at the mention in the text', () => {
   assert.deepEqual(r.spans.map(({ s, e }) => text.slice(s, e)), ['@Chloe', '@Kenny Wong UK']);
 });
 
-test('each new mention on a page tells again; re-saving the same text does not', () => {
-  const counts = text => mentionCounts(text, friends);
-  const told = new Map();
-  assert.deepEqual(newlyMentioned(counts('hi @Chloe Wong'), told), ['c']);
-  told.set('c', 1);
-  assert.deepEqual(newlyMentioned(counts('hi @Chloe Wong, more words'), told), []);
-  assert.deepEqual(newlyMentioned(counts('hi @Chloe Wong. Later @Chloe again'), told), ['c']);
-  assert.deepEqual(newlyMentioned(counts('@Kenny Lee'), told), ['k2']);
+test('a page tells on each new mention, and again after a tag is removed and added back', () => {
+  let told = new Map();
+  const save = text => {
+    const { tell, set, drop } = mentionChanges(mentionCounts(text, friends), told);
+    told = new Map([...told, ...set]);
+    drop.forEach(id => told.delete(id));
+    return tell;
+  };
+  assert.deepEqual(save('hi @Chloe Wong'), ['c']);
+  assert.deepEqual(save('hi @Chloe Wong, more words'), []);
+  assert.deepEqual(save('hi @Chloe Wong. Later @Chloe again'), ['c']);
+  assert.deepEqual(save('hi. Later @Chloe again'), []); // one removed
+  assert.deepEqual(save('hi'), []); // all removed
+  assert.deepEqual(save('hi @Chloe'), ['c']); // added back
+  assert.deepEqual(save('hi @Chloe and @Kenny Lee'), ['k2']);
 });
