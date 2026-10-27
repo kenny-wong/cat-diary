@@ -21,7 +21,14 @@ export async function onRequestDelete({ env, data, params }) {
   if (!data.user) return unauthorized();
   if (!isId(params.id)) return badRequest('Bad page id.');
   try {
-    await env.DB.prepare('DELETE FROM entries WHERE user_id = ? AND id = ?').bind(data.user.id, params.id).run();
+    // A torn-out page takes its comments, reactions and notifications with it.
+    const page = [data.user.id, params.id];
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM entries WHERE user_id = ? AND id = ?').bind(...page),
+      env.DB.prepare('DELETE FROM comments WHERE entry_owner = ? AND entry_id = ?').bind(...page),
+      env.DB.prepare('DELETE FROM reactions WHERE entry_owner = ? AND entry_id = ?').bind(...page),
+      env.DB.prepare('DELETE FROM notifications WHERE entry_owner = ? AND entry_id = ?').bind(...page),
+    ]);
     return json({ ok: true });
   } catch (err) {
     return serverError(err, 'delete page');

@@ -8,7 +8,14 @@
   const PHOTO_BYTES = 1500000; // stay well under the server's 1.9 MB photo limit
   const MOODS = [['😊', 'Happy'], ['🥰', 'Loved'], ['😆', 'Excited'], ['😌', 'Calm'], ['😐', 'Meh'], ['😢', 'Sad'], ['😠', 'Grumpy'], ['😴', 'Sleepy']];
   const WEATHERS = [['☀️', 'Sunny'], ['⛅', 'Cloudy'], ['🌧️', 'Rainy'], ['⛈️', 'Stormy'], ['❄️', 'Snowy'], ['🌈', 'Rainbow'], ['🌬️', 'Windy']];
+  const SPORTS = [['🏸', 'Badminton'], ['⚽', 'Football'], ['🏀', 'Basketball'], ['🏐', 'Volleyball'], ['🎾', 'Tennis'],
+    ['🏓', 'Table tennis'], ['🏊', 'Swimming'], ['🏃', 'Running'], ['🚴', 'Cycling'], ['🧘', 'Yoga'], ['🏋️', 'Gym'],
+    ['🥾', 'Hiking'], ['💃', 'Dance'], ['⛸️', 'Skating'], ['🥋', 'Martial arts'], ['⚾', 'Baseball']];
   const FRAMES = ['polaroid', 'tape', 'round', 'none'];
+  // Doodles: drawn on the page, then kept as a sticker whose picture is a list of pen strokes.
+  const DRAW_COLORS = ['#3b2a20', '#e5534b', '#f08c3a', '#f2c94c', '#5fb36b', '#3a8fd6', '#9b6bd6', '#f28cb1', '#ffffff'];
+  const DRAW_SIZES = [3, 7, 14];
+  const MAX_DRAW_POINTS = 20000;
   const PHOTO_MAX = 1400;
   const { paw, blossom, escape } = Stickers;
 
@@ -135,7 +142,7 @@
   function newEntry(extra = {}) {
     const now = Date.now();
     return {
-      id: uid(), date: todayStr(), title: '', body: '', mood: '', weather: '',
+      id: uid(), date: todayStr(), title: '', body: '', mood: '', weather: '', sports: [],
       theme: state?.defaultTheme || 'cat', stickers: [], shared: !!state?.shareNewPages, createdAt: now, updatedAt: now, ...extra,
     };
   }
@@ -160,6 +167,30 @@
     });
   }
 
+  // A doodle's strokes, keeping only known colours and sizes and plain numbers (it may come from a friend).
+  function cleanDrawing(d) {
+    if (!d || typeof d !== 'object' || !Array.isArray(d.strokes)) return null;
+    const w = Number(d.w), h = Number(d.h);
+    if (!(w >= 1 && w <= 5000 && h >= 1 && h <= 5000)) return null;
+    let total = 0;
+    const strokes = [];
+    for (const st of d.strokes.slice(0, 500)) {
+      if (!st || !Array.isArray(st.p) || st.p.length < 2 || st.p.length % 2) continue;
+      const p = st.p.map(Number);
+      if (!p.every(Number.isFinite)) continue;
+      total += p.length / 2;
+      if (total > MAX_DRAW_POINTS) break;
+      strokes.push({ c: DRAW_COLORS.includes(st.c) ? st.c : DRAW_COLORS[0], s: DRAW_SIZES.includes(st.s) ? st.s : DRAW_SIZES[0], p });
+    }
+    return strokes.length ? { w: Math.round(w), h: Math.round(h), strokes } : null;
+  }
+
+  function drawingSvg(d) {
+    const path = p => `M${p[0]} ${p[1]}` + (p.length === 2 ? 'l0 0' : '') + p.slice(2).map((v, i) => (i % 2 ? ' ' : ' L') + v).join('');
+    return `<svg viewBox="0 0 ${d.w} ${d.h}" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke-linecap="round" stroke-linejoin="round">` +
+      d.strokes.map(st => `<path d="${path(st.p)}" stroke="${st.c}" stroke-width="${st.s}"/>`).join('') + '</g></svg>';
+  }
+
   function sanitizeEntry(e) {
     if (!e || typeof e !== 'object') return null;
     const str = (v, max = 100000) => (typeof v === 'string' ? v.slice(0, max) : '');
@@ -172,6 +203,7 @@
       body: str(e.body),
       mood: str(e.mood, 16),
       weather: str(e.weather, 16),
+      sports: [...new Set(Array.isArray(e.sports) ? e.sports : [])].filter(v => SPORTS.some(([emo]) => emo === v)),
       theme: THEMES[e.theme] ? e.theme : 'cat',
       stickers: (Array.isArray(e.stickers) ? e.stickers : [])
         .filter(s => s && typeof s.ref === 'string')
@@ -181,12 +213,14 @@
             ref: s.ref.slice(0, 48),
             x: clamp(num(s.x, 50), 0, 100),
             y: Math.max(0, num(s.y, 100)),
-            size: clamp(num(s.size, 60), 20, 600),
+            size: clamp(num(s.size, 60), 20, s.ref === 'draw' ? 1000 : 600),
             rot: num(s.rot, 0) % 360,
           };
           if (isPhoto(st.ref)) st.frame = FRAMES.includes(s.frame) ? s.frame : 'polaroid';
+          if (st.ref === 'draw' && !(st.draw = cleanDrawing(s.draw))) return null;
           return st;
-        }),
+        })
+        .filter(Boolean),
       shared: e.shared === true,
       createdAt: num(e.createdAt, Date.now()),
       updatedAt: num(e.updatedAt, Date.now()),
@@ -307,6 +341,7 @@
     title: $('titleInput'), body: $('bodyInput'),
     dateBadge: $('dateBadge'), dateInput: $('dateInput'), dateDay: $('dateDay'), dateMonth: $('dateMonth'), dateWeek: $('dateWeek'),
     moodBtn: $('moodBtn'), moodPop: $('moodPop'), weatherBtn: $('weatherBtn'), weatherPop: $('weatherPop'),
+    sportBtn: $('sportBtn'), sportPop: $('sportPop'), drawBtn: $('drawBtn'),
     templates: $('templates'), list: $('entryList'), search: $('search'), viewSeg: $('viewSeg'),
     photoBtn: $('photoBtn'), photoInput: $('photoInput'),
     trayTabs: $('trayTabs'), trayGrid: $('trayGrid'), tray: $('tray'), fab: $('stickerFab'), trayClose: $('trayClose'),
@@ -317,6 +352,8 @@
     friendsBtn: $('friendsBtn'), friendsBadge: $('friendsBadge'), friendsDialog: $('friendsDialog'),
     friendSections: $('friendSections'), addFriendForm: $('addFriendForm'), friendEmail: $('friendEmail'),
     addFriendMsg: $('addFriendMsg'), shareDefaultSeg: $('shareDefaultSeg'),
+    myTalk: $('myTalk'), notifBtn: $('notifBtn'), notifBadge: $('notifBadge'), notifPop: $('notifPop'),
+    notifList: $('notifList'), notifAlerts: $('notifAlerts'),
   };
 
   const current = () => state.entries.find(e => e.id === state.currentId);
@@ -392,6 +429,7 @@
     if (document.hidden && (dirty.size || prefsDirty)) saveNow();
     // Coming back to the tab: pick up new friend requests and the best friend's latest pages.
     if (!document.hidden && Date.now() - friendsLoadedAt > 60000) loadFriends();
+    if (!document.hidden && Date.now() - notesLoadedAt > 20000) loadNotifications();
   });
 
   let toastTimer;
@@ -440,6 +478,16 @@
     els.weatherBtn.classList.toggle('set', !!entry.weather);
     els.moodPop.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === entry.mood && !!b.dataset.v));
     els.weatherPop.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === entry.weather && !!b.dataset.v));
+    const sports = SPORTS.filter(([emo]) => entry.sports.includes(emo));
+    els.sportBtn.innerHTML = sports.length
+      ? `<span class="emo">${sports.map(([emo]) => emo).join('')}</span><span class="label">${sports.length === 1 ? sports[0][1] : `${sports.length} sports`}</span>`
+      : '<span class="emo">＋</span><span class="label">Sport</span>';
+    els.sportBtn.classList.toggle('set', sports.length > 0);
+    els.sportPop.querySelectorAll('button').forEach(b => {
+      const on = entry.sports.includes(b.dataset.v);
+      b.classList.toggle('on', on);
+      if (b.dataset.v) b.setAttribute('aria-pressed', on);
+    });
     els.shareBtn.innerHTML = entry.shared
       ? '<span class="emo">👫</span><span class="label">Friends can read</span>'
       : '<span class="emo">🔒</span><span class="label">Only me</span>';
@@ -475,6 +523,9 @@
     renderStickers();
     updateWordCount(entry);
     renderBest();
+    els.myTalk.dataset.owner = user.id;
+    els.myTalk.dataset.entry = entry.id;
+    loadTalk(els.myTalk);
   }
 
   // ---------- Sidebar: calendar, year > month folders, search ----------
@@ -612,7 +663,7 @@
       el.className = 'sticker' + (Stickers.meta(st.ref).tape ? ' is-tape' : '') +
         (photo ? ` is-photo frame-${st.frame}` : '') + (st.id === selectedStickerId ? ' selected' : '');
       el.dataset.id = st.id;
-      el.innerHTML = `<div class="sticker-art">${photo ? photoHtml(st) : Stickers.render(st.ref)}</div>` +
+      el.innerHTML = `<div class="sticker-art">${photo ? photoHtml(st) : st.ref === 'draw' ? drawingSvg(st.draw) : Stickers.render(st.ref)}</div>` +
         `<button class="st-del" type="button" aria-label="Remove">×</button>` +
         (photo ? `<button class="st-frame" type="button" aria-label="Change frame" title="Change frame">🖼️</button>` : '') +
         `<span class="st-handle" aria-hidden="true"></span>`;
@@ -633,8 +684,10 @@
   }, true);
 
   // Grow the page so stickers placed near the bottom never fall off it.
+  const stickerHeight = st => (st.ref === 'draw' ? st.size * st.draw.h / st.draw.w : st.size);
+
   function fitPage() {
-    const bottom = current().stickers.reduce((max, st) => Math.max(max, st.y + st.size / 2), 0);
+    const bottom = current().stickers.reduce((max, st) => Math.max(max, st.y + stickerHeight(st) / 2), 0);
     els.page.style.setProperty('--sticker-bottom', `${Math.round(bottom + 40)}px`);
   }
 
@@ -664,10 +717,11 @@
   }
 
   // opts.x (%) / opts.y (px) place the sticker exactly, e.g. where a photo was dropped.
+  // A doodle also passes its size, rotation and strokes (opts.draw).
   function addSticker(ref, opts = {}) {
     const entry = current();
     const photo = isPhoto(ref);
-    const size = photo ? Math.round(Math.min(220, els.layer.clientWidth * 0.55)) : Stickers.meta(ref).size;
+    const size = opts.size ?? (photo ? Math.round(Math.min(220, els.layer.clientWidth * 0.55)) : Stickers.meta(ref).size);
     const rect = els.page.getBoundingClientRect();
     const trayCovers = window.matchMedia('(max-width: 1180px)').matches && els.tray.classList.contains('open');
     const visTop = Math.max(rect.top, 70);
@@ -678,9 +732,10 @@
       x: opts.x ?? clamp(50 + (Math.random() * 36 - 18), 10, 90),
       y: opts.y ?? Math.max(size / 2, y + (Math.random() * 60 - 30)),
       size,
-      rot: Math.round(Math.random() * (photo ? 10 : 24) - (photo ? 5 : 12)),
+      rot: opts.rot ?? Math.round(Math.random() * (photo ? 10 : 24) - (photo ? 5 : 12)),
     };
     if (photo) st.frame = opts.frame || 'polaroid';
+    if (opts.draw) st.draw = opts.draw;
     entry.stickers.push(st);
     selectedStickerId = st.id;
     renderStickers();
@@ -730,7 +785,7 @@
     } else {
       const dist = Math.hypot(e.clientX - drag.cx, e.clientY - drag.cy);
       const angle = Math.atan2(e.clientY - drag.cy, e.clientX - drag.cx);
-      st.size = Math.round(clamp(drag.startSize * (dist / drag.startDist), 24, 600));
+      st.size = Math.round(clamp(drag.startSize * (dist / drag.startDist), 24, st.ref === 'draw' ? 1000 : 600));
       let rot = drag.startRot + ((angle - drag.startAngle) * 180) / Math.PI;
       if (e.shiftKey) rot = Math.round(rot / 15) * 15;
       st.rot = Math.round(rot) % 360;
@@ -887,6 +942,154 @@
     if (selectedStickerId && !e.target.closest('.sticker') && !e.target.closest('.tray')) selectSticker(null);
   });
 
+  // ---------- Drawing ----------
+  // Draw straight on the page. "Done" turns the strokes into a doodle sticker that can be moved, resized and spun.
+  let drawing = null; // { canvas, ctx, bar, strokes, stroke, color, size, points }
+
+  function redrawDrawing() {
+    const { ctx, canvas, strokes } = drawing;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const st of strokes) {
+      ctx.strokeStyle = st.c;
+      ctx.lineWidth = st.s;
+      ctx.beginPath();
+      ctx.moveTo(st.p[0], st.p[1]);
+      if (st.p.length === 2) ctx.lineTo(st.p[0] + 0.01, st.p[1]); // a single tap makes a dot
+      for (let i = 2; i < st.p.length; i += 2) ctx.lineTo(st.p[i], st.p[i + 1]);
+      ctx.stroke();
+    }
+  }
+
+  function startDrawing() {
+    if (drawing || view) return;
+    setTray(false);
+    selectSticker(null);
+    closePops();
+    const canvas = document.createElement('canvas');
+    canvas.className = 'draw-canvas';
+    const w = els.page.clientWidth;
+    const h = els.page.clientHeight;
+    const dpr = Math.min(2, window.devicePixelRatio || 1); // big pages on phones would make a huge canvas
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = ctx.lineJoin = 'round';
+    els.page.appendChild(canvas);
+
+    const bar = document.createElement('div');
+    bar.className = 'draw-bar';
+    bar.setAttribute('role', 'toolbar');
+    bar.setAttribute('aria-label', 'Drawing tools');
+    bar.innerHTML =
+      `<div class="draw-row">${DRAW_COLORS.map((c, i) => `<button type="button" class="draw-color${i ? '' : ' on'}" data-color="${c}" style="--c:${c}" aria-label="Colour ${i + 1}"></button>`).join('')}</div>` +
+      `<div class="draw-row">${DRAW_SIZES.map((s, i) => `<button type="button" class="draw-size${i === 1 ? ' on' : ''}" data-size="${s}" aria-label="Pen size ${i + 1}"><span style="--s:${s}px"></span></button>`).join('')}` +
+      '<button type="button" class="btn draw-tool" data-act="scroll" aria-pressed="false" title="Scroll the page instead of drawing">✋</button>' +
+      '<button type="button" class="btn draw-tool" data-act="undo" title="Undo">↶</button>' +
+      '<button type="button" class="btn" data-act="cancel">Cancel</button>' +
+      '<button type="button" class="btn primary" data-act="done">Done</button></div>';
+    document.body.appendChild(bar);
+    document.body.classList.add('drawing');
+    drawing = { canvas, ctx, bar, strokes: [], stroke: null, color: DRAW_COLORS[0], size: DRAW_SIZES[1], points: 0 };
+
+    const pos = e => {
+      const r = canvas.getBoundingClientRect();
+      return [Math.round((e.clientX - r.left) * 10) / 10, Math.round((e.clientY - r.top) * 10) / 10];
+    };
+    canvas.addEventListener('pointerdown', e => {
+      if (drawing.points >= MAX_DRAW_POINTS) return toast('This drawing is full. Tap Done, then start another one.');
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      drawing.stroke = { c: drawing.color, s: drawing.size, p: pos(e) };
+      drawing.strokes.push(drawing.stroke);
+      drawing.points++;
+      redrawDrawing();
+    });
+    canvas.addEventListener('pointermove', e => {
+      const st = drawing?.stroke;
+      if (!st || drawing.points >= MAX_DRAW_POINTS) return;
+      const [x, y] = pos(e);
+      const n = st.p.length;
+      if (Math.hypot(x - st.p[n - 2], y - st.p[n - 1]) < 2) return; // skip tiny moves to keep doodles small
+      st.p.push(x, y);
+      drawing.points++;
+      ctx.strokeStyle = st.c;
+      ctx.lineWidth = st.s;
+      ctx.beginPath();
+      ctx.moveTo(st.p[n - 2], st.p[n - 1]);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    });
+    const endStroke = () => { if (drawing) drawing.stroke = null; };
+    canvas.addEventListener('pointerup', endStroke);
+    canvas.addEventListener('pointercancel', endStroke);
+
+    bar.addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const pick = sel => bar.querySelectorAll(sel).forEach(x => x.classList.toggle('on', x === b));
+      if (b.dataset.color) {
+        drawing.color = b.dataset.color;
+        pick('.draw-color');
+      } else if (b.dataset.size) {
+        drawing.size = Number(b.dataset.size);
+        pick('.draw-size');
+      } else if (b.dataset.act === 'scroll') {
+        const on = canvas.classList.toggle('scrolling');
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on);
+      } else if (b.dataset.act === 'undo') {
+        const st = drawing.strokes.pop();
+        if (st) drawing.points -= st.p.length / 2;
+        redrawDrawing();
+      } else if (b.dataset.act === 'cancel') {
+        if (drawing.strokes.length && !confirm('Throw away this drawing?')) return;
+        stopDrawing();
+      } else if (b.dataset.act === 'done') {
+        finishDrawing();
+      }
+    });
+    toast('Draw on the page, then tap Done.');
+  }
+
+  function stopDrawing() {
+    if (!drawing) return;
+    drawing.canvas.remove();
+    drawing.bar.remove();
+    document.body.classList.remove('drawing');
+    drawing = null;
+  }
+
+  // Crop the strokes to their bounding box and place them as a doodle sticker at the same spot.
+  function finishDrawing() {
+    const { strokes } = drawing;
+    if (!strokes.length) return stopDrawing();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, pad = 0;
+    for (const st of strokes) {
+      pad = Math.max(pad, st.s / 2 + 2);
+      for (let i = 0; i < st.p.length; i += 2) {
+        minX = Math.min(minX, st.p[i]);
+        maxX = Math.max(maxX, st.p[i]);
+        minY = Math.min(minY, st.p[i + 1]);
+        maxY = Math.max(maxY, st.p[i + 1]);
+      }
+    }
+    minX -= pad;
+    minY -= pad;
+    const w = Math.max(1, Math.ceil(maxX + pad - minX));
+    const h = Math.max(1, Math.ceil(maxY + pad - minY));
+    const r1 = v => Math.round(v * 10) / 10;
+    const draw = { w, h, strokes: strokes.map(st => ({ c: st.c, s: st.s, p: st.p.map((v, i) => r1(v - (i % 2 ? minY : minX))) })) };
+    const layerWidth = els.layer.clientWidth; // the canvas and the sticker layer cover the same box
+    stopDrawing();
+    addSticker('draw', { x: clamp(((minX + w / 2) / layerWidth) * 100, 0, 100), y: minY + h / 2, size: w, rot: 0, draw });
+    toast('✏️ Your doodle is now a sticker: drag, resize or spin it.');
+  }
+
+  els.drawBtn.addEventListener('click', startDrawing);
+
   // ---------- Sticker tray ----------
   let activePack = Stickers.PACKS[0].id;
   function renderTray() {
@@ -954,7 +1157,16 @@
     touch(entry);
   });
 
-  function setupPicker(btn, pop, options, key) {
+  // Keep an open picker inside the screen, whatever side of the page its button is on.
+  function fitPop(pop) {
+    pop.style.left = '';
+    const r = pop.getBoundingClientRect();
+    const shift = Math.min(0, window.innerWidth - 8 - r.right) || Math.max(0, 8 - r.left);
+    if (shift) pop.style.left = `${shift}px`;
+  }
+
+  // multi: several can be picked (sports), and the picker stays open while picking.
+  function setupPicker(btn, pop, options, key, { multi = false } = {}) {
     pop.innerHTML = options.map(([emo, name]) => `<button type="button" data-v="${emo}" title="${name}" aria-label="${name}">${emo}</button>`).join('') +
       `<button type="button" class="clear" data-v="" title="Clear">clear</button>`;
     btn.addEventListener('click', () => {
@@ -962,26 +1174,36 @@
       closePops();
       pop.hidden = !willOpen;
       btn.setAttribute('aria-expanded', willOpen);
+      if (willOpen) fitPop(pop);
     });
     pop.addEventListener('click', e => {
       const b = e.target.closest('button');
       if (!b) return;
       const entry = current();
-      entry[key] = b.dataset.v;
-      closePops();
+      const v = b.dataset.v;
+      if (!multi) {
+        entry[key] = v;
+        closePops();
+      } else if (!v) {
+        entry[key] = [];
+        closePops();
+      } else {
+        entry[key] = entry[key].includes(v) ? entry[key].filter(x => x !== v) : [...entry[key], v];
+      }
       renderMeta(entry);
       renderList();
       touch(entry);
     });
   }
   function closePops() {
-    [[els.moodBtn, els.moodPop], [els.weatherBtn, els.weatherPop]].forEach(([btn, pop]) => {
+    [[els.moodBtn, els.moodPop], [els.weatherBtn, els.weatherPop], [els.sportBtn, els.sportPop]].forEach(([btn, pop]) => {
       pop.hidden = true;
       btn.setAttribute('aria-expanded', 'false');
     });
   }
   setupPicker(els.moodBtn, els.moodPop, MOODS, 'mood');
   setupPicker(els.weatherBtn, els.weatherPop, WEATHERS, 'weather');
+  setupPicker(els.sportBtn, els.sportPop, SPORTS, 'sports', { multi: true });
   document.addEventListener('click', e => { if (!e.target.closest('.picker')) closePops(); });
 
   els.templates.addEventListener('click', e => {
@@ -1002,6 +1224,7 @@
     renderMeta(entry);
     renderList();
     touch(entry);
+    saveNow().then(() => loadTalk(els.myTalk));
     toast(entry.shared ? '👫 Your friends can now read this page.' : '🔒 This page is private again.');
   });
 
@@ -1009,6 +1232,7 @@
   // fromCalendar keeps the calendar where the user is browsing; otherwise it jumps to the page's month.
   // Works for your own diary and, while reading one, a friend's.
   function openEntry(id, { fromCalendar = false } = {}) {
+    stopDrawing();
     if (saveTimer) saveNow();
     book().currentId = id;
     selectedStickerId = null;
@@ -1114,12 +1338,12 @@
       const found = list.find(([emo]) => emo === value);
       return found ? `<span class="pick-btn set"><span class="emo">${found[0]}</span><span class="label">${found[1]}</span></span>` : '';
     };
-    const bottom = entry.stickers.reduce((max, st) => Math.max(max, st.y + st.size / 2), 0);
+    const bottom = entry.stickers.reduce((max, st) => Math.max(max, st.y + stickerHeight(st) / 2), 0);
     const stickers = entry.stickers.map((st, i) => {
       const photo = isPhoto(st.ref);
       const art = photo
         ? `<div class="photo"><img src="${escape(photoUrl(st.ref.slice(6), ownerId))}" alt="" loading="lazy" draggable="false"></div>`
-        : Stickers.render(st.ref);
+        : st.ref === 'draw' ? drawingSvg(st.draw) : Stickers.render(st.ref);
       return `<div class="sticker${Stickers.meta(st.ref).tape ? ' is-tape' : ''}${photo ? ` is-photo frame-${st.frame}` : ''}" ` +
         `style="left:${st.x}%;top:${st.y}px;width:${st.size}px;font-size:${st.size * 0.8}px;--rot:${st.rot}deg;z-index:${i + 1}">` +
         `<div class="sticker-art">${art}</div></div>`;
@@ -1129,7 +1353,7 @@
       `<div class="page-head"><div class="date-badge"><span class="date-day">${d.getDate()}</span><span class="date-meta">` +
       `<span class="date-month">${d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>` +
       `<span class="date-week">${d.toLocaleDateString(undefined, { weekday: 'long' })}</span></span></div>` +
-      `${tag(MOODS, entry.mood)}${tag(WEATHERS, entry.weather)}</div>` +
+      `${tag(MOODS, entry.mood)}${tag(WEATHERS, entry.weather)}${entry.sports.map(v => tag(SPORTS, v)).join('')}</div>` +
       `<h2 class="entry-title">${escape(entry.title || 'Untitled page')}</h2>` +
       `<div class="entry-body">${escape(entry.body)}</div>` +
       `<div class="sticker-layer">${stickers}</div></article></div>`;
@@ -1161,8 +1385,9 @@
     els.bestPane.innerHTML =
       `<div class="best-head"><span>⭐ ${name}'s page</span><button class="link-btn" type="button" data-read-best>Read all of ${name}'s diary</button></div>` +
       (onDay.length
-        ? onDay.map(e => readonlyPageHtml(e, best.friend.id)).join('')
+        ? onDay.map(e => readonlyPageHtml(e, best.friend.id) + talkShell(best.friend.id, e.id)).join('')
         : `<div class="best-empty">${name} hasn't shared a page for ${parseDate(date).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}.</div>`);
+    els.bestPane.querySelectorAll('.talk').forEach(loadTalk);
   }
   els.bestPane.addEventListener('click', e => {
     if (e.target.closest('[data-read-best]')) openFriend(best.friend);
@@ -1195,19 +1420,25 @@
   function renderFriendPage() {
     const entry = shown();
     applyTheme(entry);
-    els.friendView.innerHTML = readonlyPageHtml(entry, view.friend.id);
+    els.friendView.innerHTML = readonlyPageHtml(entry, view.friend.id) + talkShell(view.friend.id, entry.id);
+    loadTalk(els.friendView.querySelector('.talk'));
   }
 
-  async function openFriend(friend) {
+  // entryId (optional) opens that page, e.g. from a notification. Resolves true once the diary is open.
+  async function openFriend(friend, entryId) {
     let data;
     try {
       data = await Api.get(`/api/friends/${friend.id}/diary`);
     } catch (err) {
-      return toast(err.message);
+      toast(err.message);
+      return false;
     }
     const name = friend.name || friend.email;
     const entries = data.entries.map(sanitizeEntry).filter(Boolean);
-    if (!entries.length) return toast(`${name} hasn't shared any pages with friends yet.`);
+    if (!entries.length) {
+      toast(`${name} hasn't shared any pages with friends yet.`);
+      return false;
+    }
     saveNow();
     selectSticker(null);
     setTray(false);
@@ -1218,7 +1449,10 @@
     els.search.value = '';
     els.search.placeholder = `Search ${name}'s pages…`;
     renderBest();
-    openEntry(sortedEntries()[0].id);
+    const found = entries.some(e => e.id === entryId);
+    if (entryId && !found) toast(`${name} isn't sharing that page any more.`);
+    openEntry(found ? entryId : sortedEntries()[0].id);
+    return found || !entryId;
   }
 
   function closeFriend() {
@@ -1343,6 +1577,232 @@
     toast(state.shareNewPages ? 'New pages will be shared with your friends.' : 'New pages will be private.');
   });
 
+  // ---------- Comments & reactions ----------
+  const REACTIONS = ['❤️', '😂', '😮', '😢', '👍', '🐱', '🎉', '🥰'];
+
+  function ago(iso) {
+    const s = (Date.now() - new Date(iso)) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+    if (s < 7 * 86400) return `${Math.floor(s / 86400)} d ago`;
+    return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  }
+
+  const talkShell = (owner, entryId) => `<section class="talk" data-owner="${escape(owner)}" data-entry="${escape(entryId)}" aria-label="Comments"></section>`;
+
+  const commentForm = (parentId = '', name = '') =>
+    `<form class="c-form${parentId ? ' reply' : ''}" data-parent="${escape(parentId)}">` +
+    `<textarea rows="2" maxlength="1000" placeholder="${name ? `Reply to ${escape(name)}…` : 'Write a comment…'}" aria-label="${parentId ? 'Reply' : 'Comment'}"></textarea>` +
+    '<button class="btn primary" type="submit">Send</button></form>';
+
+  // Everything here can come from other people, so all of it is escaped.
+  function talkHtml(d) {
+    const reacts = REACTIONS.map(emo => {
+      const r = d.reactions.find(x => x.emoji === emo);
+      return `<button type="button" class="react${r?.mine ? ' on' : ''}" data-react="${emo}" aria-pressed="${!!r?.mine}" ` +
+        `title="${r ? escape(r.names.join(', ')) : 'React'}">${emo}${r ? `<span class="react-n">${r.count}</span>` : ''}</button>`;
+    }).join('');
+    const one = c => `<div class="comment${c.mine ? ' mine' : ''}" data-id="${escape(c.id)}" data-name="${escape(c.authorName)}">` +
+      `<div class="c-head"><strong>${escape(c.authorName)}</strong><time datetime="${escape(c.createdAt)}">${ago(c.createdAt)}</time></div>` +
+      `<div class="c-body">${escape(c.body)}</div>` +
+      '<div class="c-actions"><button type="button" class="link-btn" data-reply>Reply</button>' +
+      `${c.canDelete ? '<button type="button" class="link-btn" data-del>Delete</button>' : ''}</div></div>`;
+    const n = d.comments.length;
+    const threads = d.comments.filter(c => !c.parentId).map(c =>
+      `<div class="thread">${one(c)}<div class="replies">${d.comments.filter(r => r.parentId === c.id).map(one).join('')}</div></div>`).join('');
+    return `<div class="reacts">${reacts}</div>` +
+      `<h3 class="talk-title">💬 ${n ? `${n} comment${n === 1 ? '' : 's'}` : 'Comments'}</h3>` +
+      `<div class="threads">${threads}</div>` + commentForm();
+  }
+
+  async function loadTalk(section) {
+    if (!section) return;
+    const { owner, entry } = section.dataset;
+    let data = null;
+    try {
+      data = await Api.get(`/api/talk?owner=${encodeURIComponent(owner)}&entry=${encodeURIComponent(entry)}`);
+    } catch { /* not saved yet, or no longer visible: no comments area */ }
+    if (section.dataset.owner !== owner || section.dataset.entry !== entry) return; // a different page by now
+    const mine = section === els.myTalk;
+    // On your own private page the area only shows when there is something to read.
+    const quiet = !data || (mine && !current().shared && !data.comments.length && !data.reactions.length);
+    section.hidden = mine && quiet;
+    // Keep anything being typed across the refresh.
+    const drafts = [...section.querySelectorAll('.c-form')]
+      .map(f => ({ parent: f.dataset.parent, text: f.querySelector('textarea').value }))
+      .filter(d => d.text);
+    section.innerHTML = data && !section.hidden ? talkHtml(data) : '';
+    for (const d of drafts) {
+      const c = d.parent && section.querySelector(`.comment[data-id="${CSS.escape(d.parent)}"]`);
+      if (c) c.insertAdjacentHTML('afterend', commentForm(d.parent, c.dataset.name));
+      const form = d.parent ? section.querySelector('.c-form.reply') : section.querySelector('.c-form:not(.reply)');
+      if (form) form.querySelector('textarea').value = d.text;
+    }
+  }
+
+  document.addEventListener('click', async e => {
+    const section = e.target.closest('.talk');
+    const b = e.target.closest('button');
+    if (!section || !b) return;
+    const { owner, entry } = section.dataset;
+    const c = b.closest('.comment');
+    try {
+      if (b.dataset.react) {
+        b.disabled = true;
+        await Api.post('/api/reactions', { owner, entry, emoji: b.dataset.react });
+        loadTalk(section);
+      } else if ('reply' in b.dataset) {
+        section.querySelector('.c-form.reply')?.remove();
+        c.insertAdjacentHTML('afterend', commentForm(c.dataset.id, c.dataset.name));
+        section.querySelector('.c-form.reply textarea').focus();
+      } else if ('del' in b.dataset) {
+        const hasReplies = !c.closest('.replies') && c.nextElementSibling?.children.length;
+        if (!confirm(`Delete this comment?${hasReplies ? ' Its replies will go too.' : ''}`)) return;
+        await Api.del(`/api/comments/${c.dataset.id}`);
+        loadTalk(section);
+      }
+    } catch (err) {
+      toast(err.message);
+      b.disabled = false;
+    }
+  });
+
+  document.addEventListener('submit', async e => {
+    const form = e.target.closest('.c-form');
+    if (!form) return;
+    e.preventDefault();
+    const section = form.closest('.talk');
+    const text = form.querySelector('textarea');
+    const body = text.value.trim();
+    if (!body) return text.focus();
+    const send = form.querySelector('button');
+    send.disabled = true;
+    try {
+      await Api.post('/api/comments', { owner: section.dataset.owner, entry: section.dataset.entry, body, parentId: form.dataset.parent || undefined });
+      text.value = ''; // sent, so not a draft to keep
+      await loadTalk(section);
+    } catch (err) {
+      toast(err.message);
+      send.disabled = false;
+    }
+  });
+  // Ctrl/⌘ + Enter sends a comment.
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.closest('.c-form')) e.target.closest('.c-form').requestSubmit();
+  });
+
+  // ---------- Notifications ----------
+  let notes = { unread: 0, items: [] };
+  let notesLoadedAt = 0;
+  const seenNotes = new Set();
+
+  const pageName = n => (n.title ? `“${n.title}”` : 'a page');
+  function noteText(n) {
+    if (n.kind === 'reply') return `${n.actorName} replied to your comment on ${n.owner === user.id ? 'your' : `${n.ownerName}'s`} page ${pageName(n)}`;
+    if (n.kind === 'reaction') return `${n.actorName} reacted ${n.emoji} to your page ${pageName(n)}`;
+    return `${n.actorName} commented on your page ${pageName(n)}`;
+  }
+
+  function showUnread() {
+    els.notifBadge.textContent = notes.unread > 99 ? '99+' : notes.unread;
+    els.notifBadge.hidden = !notes.unread;
+    els.notifBtn.title = notes.unread ? `${notes.unread} new notification${notes.unread === 1 ? '' : 's'}` : 'Notifications';
+    document.title = notes.unread ? `(${notes.unread}) My Little Diary` : 'My Little Diary';
+  }
+
+  async function loadNotifications() {
+    try {
+      notes = await Api.get('/api/notifications');
+    } catch {
+      return;
+    }
+    const fresh = notes.items.filter(n => !n.read && !seenNotes.has(n.id));
+    // Pop-up alerts, only for news that arrives while the tab is in the background.
+    if (notesLoadedAt && document.hidden && fresh.length && 'Notification' in window && Notification.permission === 'granted') {
+      for (const n of fresh.slice(0, 3)) {
+        try {
+          const alert = new Notification('My Little Diary', { body: noteText(n), tag: n.id });
+          alert.onclick = () => {
+            window.focus();
+            openNote(n);
+            alert.close();
+          };
+        } catch { /* some browsers only allow alerts from a service worker */ }
+      }
+    }
+    notes.items.forEach(n => seenNotes.add(n.id));
+    notesLoadedAt = Date.now();
+    showUnread();
+    if (!els.notifPop.hidden) renderNotes();
+  }
+
+  function renderNotes() {
+    els.notifList.innerHTML = notes.items.length
+      ? notes.items.map(n => `<button type="button" class="note${n.read ? '' : ' unread'}" data-note="${escape(n.id)}">` +
+        `<span class="note-icon" aria-hidden="true">${n.kind === 'reaction' ? escape(n.emoji || '❤️') : n.kind === 'reply' ? '↩️' : '💬'}</span>` +
+        `<span class="note-main"><span>${escape(noteText(n))}</span>` +
+        `${n.comment ? `<span class="note-quote">${escape(n.comment.length > 120 ? `${n.comment.slice(0, 120)}…` : n.comment)}</span>` : ''}` +
+        `<time>${ago(n.createdAt)}</time></span></button>`).join('')
+      : '<p class="note-empty">Nothing yet. When friends comment on or react to your pages, it shows up here.</p>';
+    els.notifAlerts.hidden = !('Notification' in window) || Notification.permission !== 'default';
+  }
+
+  async function openNote(n) {
+    if (n.owner === user.id) {
+      closeFriend();
+      if (!state.entries.some(e => e.id === n.entryId)) return toast('That page was torn out.');
+      openEntry(n.entryId);
+      return revealTalk(els.myTalk);
+    }
+    const friend = friendsData.friends.find(f => f.id === n.owner);
+    if (!friend) return toast(`You're no longer friends with ${n.ownerName}.`);
+    if (await openFriend(friend, n.entryId)) revealTalk(els.friendView.querySelector('.talk'));
+  }
+
+  function revealTalk(section) {
+    if (!section) return;
+    setTimeout(() => {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      section.classList.add('flash');
+      setTimeout(() => section.classList.remove('flash'), 1800);
+    }, 400);
+  }
+
+  function closeNotes() {
+    els.notifPop.hidden = true;
+    els.notifBtn.setAttribute('aria-expanded', 'false');
+  }
+  els.notifBtn.addEventListener('click', async () => {
+    if (!els.notifPop.hidden) return closeNotes();
+    els.notifPop.hidden = false;
+    els.notifBtn.setAttribute('aria-expanded', 'true');
+    renderNotes();
+    if (!notes.unread) return;
+    // Opening the list counts as reading it; the new ones stay highlighted until next time.
+    notes.unread = 0;
+    showUnread();
+    try {
+      await Api.post('/api/notifications', { all: true });
+      notes.items.forEach(n => { n.read = true; });
+    } catch { /* they stay unread on the server and come back next time */ }
+  });
+  els.notifList.addEventListener('click', e => {
+    const b = e.target.closest('[data-note]');
+    if (!b) return;
+    closeNotes();
+    openNote(notes.items.find(n => n.id === b.dataset.note));
+  });
+  els.notifAlerts.addEventListener('click', async () => {
+    await Notification.requestPermission();
+    renderNotes();
+  });
+  document.addEventListener('click', e => {
+    if (!els.notifPop.hidden && !e.target.closest('.notif')) closeNotes();
+  });
+  // Check for news every minute while the diary is on screen.
+  setInterval(() => { if (!document.hidden) loadNotifications(); }, 60000);
+
   // ---------- Drawer (small screens) ----------
   function setDrawer(open) {
     els.sidebar.classList.toggle('open', open);
@@ -1449,6 +1909,8 @@
   Account.mountMenu(user, { beforeLogout: saveNow });
   renderShareDefault();
   els.friendsBtn.hidden = false;
+  els.notifBtn.hidden = false;
   loadFriends();
+  loadNotifications();
   if (moved) toast(`Moved ${moved} page${moved === 1 ? '' : 's'} from this browser into your account.`);
 })();

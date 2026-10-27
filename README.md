@@ -10,6 +10,10 @@ Live at **https://my-little-diary.pages.dev**
 - **Friends**: add friends by their Google email, accept or decline requests, remove friends. Each page has a 🔒 Private / 👫 Friends switch, and a setting chooses which one new pages start with.
 - **Best friend**: mark one friend with ⭐ and their page for the same day shows side by side with yours.
 - **Read a friend's diary**: browse a friend's calendar, seeing only the pages they share with friends.
+- **Comments & reactions**: comment on shared pages, reply to comments, and react with emoji. You can delete your own comments, and any comment on your own pages.
+- **Notifications**: 🔔 bell with an unread badge for comments, replies and reactions (checked every minute while the diary is open, with optional pop-up alerts while the tab is in the background).
+- **Drawing**: ✏️ Draw in the sticker box. Doodle on the page; Done turns the drawing into a sticker you can move, resize and spin.
+- **Sports**: pick one or more sports for the day next to the weather (badminton, football, basketball, volleyball and more).
 - **Templates**: dress each page in Cat Café, Sakura, Seaside, Forest, Starry Night or Vintage, each with its own colours, paper style and decorations.
 - **Stickers**: hand-drawn cat stickers, washi tapes, labels and emoji. Drag to move, pull the corner dot to resize and spin, × to peel off.
 - **Photos**: add photos from the sticker box, or drop / paste them onto the page. They are shrunk to under 1.5 MB before uploading. Choose a polaroid, taped, round or cut-out frame.
@@ -32,8 +36,8 @@ Plain HTML, CSS and JavaScript in `public/` (no build step), hosted on Cloudflar
 | `public/app.js` | Diary logic: pages, templates, stickers, photos, calendar, saving |
 | `public/privacy.html`, `public/terms.html` | Privacy policy and terms of service (linked from the login screen and account menu) |
 | `public/_headers` | Security headers (CSP and friends) |
-| `functions/api/` | API routes: `auth/google`, `auth/google/callback`, `auth/logout`, `me`, `diary`, `prefs`, `entries/:id`, `photos/:id` (`?owner=` for a friend's shared photo), `friends`, `friends/:id` (best / remove), `friends/:id/diary`, `friend-requests`, `friend-requests/:id` (accept / decline / cancel) |
-| `lib/` | Shared server code: tokens, sessions, validation, Google sign-in, friendships |
+| `functions/api/` | API routes: `auth/google`, `auth/google/callback`, `auth/logout`, `me`, `diary`, `prefs`, `entries/:id`, `photos/:id` (`?owner=` for a friend's shared photo), `friends`, `friends/:id` (best / remove), `friends/:id/diary`, `friend-requests`, `friend-requests/:id` (accept / decline / cancel), `talk` (comments + reactions of a page), `comments`, `comments/:id`, `reactions`, `notifications` |
+| `lib/` | Shared server code: tokens, sessions, validation, Google sign-in, friendships, comments |
 | `migrations/` | D1 database schema |
 | `tests/` | Unit tests (`npm test`) |
 
