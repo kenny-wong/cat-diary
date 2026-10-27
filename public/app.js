@@ -1454,6 +1454,109 @@
     showFound();
   });
 
+  // ---------- Saving a page as a picture ----------
+  // The page is laid out off screen at the width it has here (read-only markup, as friends see it), then
+  // drawn into an SVG together with the stylesheet, the fonts and the photos, and the SVG onto a canvas.
+  const toDataUrl = blob => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+  const fetchBlob = async url => {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`${url}: ${res.status}`);
+    return res.blob();
+  };
+  let snapCss = null;
+  async function pictureCss() {
+    snapCss ||= (async () => {
+      let fonts = await (await fetchBlob('/fonts.css')).text();
+      for (const url of new Set(fonts.match(/\/fonts\/[\w-]+\.woff2/g))) fonts = fonts.replaceAll(url, await toDataUrl(await fetchBlob(url)));
+      return fonts + (await (await fetchBlob('/style.css')).text());
+    })().catch(err => { snapCss = null; throw err; });
+    return snapCss;
+  }
+
+  async function pagePicture(entry) {
+    const css = await pictureCss();
+    const width = Math.round(els.page.offsetWidth) + 48;
+    const box = document.createElement('div');
+    box.className = 'snap';
+    box.dataset.theme = entry.theme;
+    box.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px`;
+    box.innerHTML = readonlyPageHtml(entry) +
+      '<div class="snap-brand"><strong>🐾 My Little Diary</strong><span>my-little-diary.pages.dev</span></div>';
+    box.querySelector('.page-foot').remove();
+    if (!entry.title) box.querySelector('.entry-title').textContent = '';
+    for (const img of box.querySelectorAll('img')) {
+      img.removeAttribute('loading');
+      try {
+        img.src = await toDataUrl(await fetchBlob(img.getAttribute('src')));
+      } catch {
+        img.parentElement.classList.add('missing');
+        img.parentElement.textContent = '📷';
+      }
+    }
+    document.body.append(box);
+    try {
+      await Promise.all([...box.querySelectorAll('img')].map(img => img.decode().catch(() => {})));
+      const height = Math.ceil(box.scrollHeight);
+      const copy = box.cloneNode(true);
+      copy.style.cssText = `width:${width}px`;
+      const html = new XMLSerializer().serializeToString(copy);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+        `<foreignObject width="100%" height="100%"><style xmlns="http://www.w3.org/1999/xhtml"><![CDATA[${css.replaceAll(']]>', '')}]]></style>` +
+        `${html}</foreignObject></svg>`;
+      const pic = new Image();
+      pic.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      await pic.decode();
+      await new Promise(r => setTimeout(r, 50)); // Safari draws fonts and photos inside an SVG only once they're ready
+      const scale = Math.min(2, Math.sqrt(16e6 / (width * height))); // phones refuse very large canvases
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      canvas.getContext('2d').drawImage(pic, 0, 0, canvas.width, canvas.height);
+      return await new Promise((resolve, reject) => canvas.toBlob(b => (b ? resolve(b) : reject(new Error('no picture'))), 'image/png'));
+    } finally {
+      box.remove();
+    }
+  }
+
+  const pictureName = entry => `diary-${entry.date}${entry.title ? '-' + entry.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 40) : ''}.png`;
+
+  $('pictureBtn').addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const entry = current();
+    btn.disabled = true;
+    toast('📸 Making your picture…');
+    try {
+      const file = new File([await pagePicture(entry)], pictureName(entry), { type: 'image/png' });
+      // Phones: the share sheet (save to photos, post, send). Computers: a download.
+      if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: entry.title || 'My diary page' });
+          toast('📸 Picture ready!');
+        } catch (err) {
+          if (err.name !== 'AbortError') throw err;
+          els.toast.hidden = true;
+        }
+      } else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(file);
+        a.download = file.name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+        toast('📸 Picture saved to your downloads.');
+      }
+    } catch (err) {
+      console.error(err);
+      toast("Couldn't make a picture in this browser. A screenshot works too!");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // ---------- Friends ----------
   // A friend's page, read-only. Everything in it comes from someone else, so every text is escaped
   // and only known values (themes, moods, frames, numbers checked by sanitizeEntry) go into markup.

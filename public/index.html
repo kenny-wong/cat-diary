@@ -23,9 +23,7 @@
    "description": "A cute, private online diary with page templates, stickers, photos, doodles, mood and weather, and pages you can share with friends.",
    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "GBP"}}
   </script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&family=Patrick+Hand&family=Special+Elite&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/fonts.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
@@ -79,7 +77,7 @@
             <label class="btn" title="Restore pages from a backup file">⬆ Import<input type="file" id="importInput" accept=".json,application/json" hidden></label>
           </div>
           <button class="btn" id="logoutBtn" type="button">Log out</button>
-          <span class="version">My Little Diary v2.15.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
+          <span class="version">My Little Diary v2.16.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
         </div>
       </div>
     </div>
@@ -101,7 +99,7 @@
       </a>
       <p class="auth-note">New here? Signing in with your Google account creates your diary.</p>
       <p class="auth-msg error" id="authMsg" role="alert"></p>
-      <p class="version">v2.15.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
+      <p class="version">v2.16.0 · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
     </div>
   </div>
 
@@ -174,7 +172,10 @@
 
       <div class="page-foot">
         <span class="foot-info"><span id="wordCount"></span><span id="editedAt"></span><span id="taggedInfo" hidden></span></span>
-        <button class="link-btn" id="deleteBtn" type="button">Tear out this page</button>
+        <span class="foot-actions">
+          <button class="link-btn" id="pictureBtn" type="button" title="Save this page as a picture to keep or post">📸 Save as picture</button>
+          <button class="link-btn" id="deleteBtn" type="button">Tear out this page</button>
+        </span>
       </div>
       <section class="talk" id="myTalk" hidden aria-label="Comments on this page"></section>
       </div>

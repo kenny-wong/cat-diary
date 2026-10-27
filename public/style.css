@@ -619,6 +619,12 @@ mark.found { color: inherit; }
 
 .foot-info { display: flex; flex-wrap: wrap; gap: 2px 12px; }
 .page-foot .link-btn { flex: none; white-space: nowrap; }
+.foot-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; }
+
+/* A page saved as a picture: the page on its template's background, with the diary's name underneath. */
+.snap { padding: 4px 24px 18px; background-color: var(--bg); background-image: var(--pattern); color: var(--ink); font-family: var(--font-ui); }
+.snap-brand { display: flex; justify-content: center; align-items: baseline; gap: 10px; margin-top: 16px; font-size: 15px; color: var(--muted); }
+.snap-brand strong { font-weight: 600; color: var(--accent); }
 
 /* ---------- Template decorations ---------- */
 .page-deco { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
