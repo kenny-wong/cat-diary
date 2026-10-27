@@ -143,6 +143,26 @@
   };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+  // What a mood / weather / sport / activity pill shows. Empty: a faded hint emoji and the picker's name.
+  // One chosen: its emoji and name. Several: up to 3 emoji and "+n" (narrow rows: the first and "+n").
+  // The title always lists everything chosen.
+  const PICKERS = {
+    mood: ['Mood', '🙂'], weather: ['Weather', '🌤️'], sports: ['Sport', '⚽'], activities: ['Activity', '🎈'],
+  };
+  function pickContent(key, list, picked) {
+    const [name, hint] = PICKERS[key];
+    const chosen = list.filter(([emo]) => picked.includes(emo));
+    const title = chosen.length ? `${name}: ${chosen.map(([, n]) => n).join(', ')}` : name;
+    if (!chosen.length) return { title, html: `<span class="emo hint">${hint}</span><span class="label">${name}</span>` };
+    if (chosen.length === 1) return { title, html: `<span class="emo">${chosen[0][0]}</span><span class="label">${chosen[0][1]}</span>` };
+    const more = n => (n > 0 ? `<small>+${n}</small>` : '');
+    return {
+      title,
+      html: `<span class="emo many"><span class="wide">${chosen.slice(0, 3).map(([e]) => e).join('')}${more(chosen.length - 3)}</span>` +
+        `<span class="narrow">${chosen[0][0]}${more(chosen.length - 1)}</span></span>`,
+    };
+  }
+
   function newEntry(extra = {}) {
     const now = Date.now();
     return {
@@ -477,36 +497,22 @@
     els.dateWeek.textContent = d.toLocaleDateString(undefined, { weekday: 'long' });
     els.dateInput.value = entry.date;
 
-    const label = (list, value, name) => {
-      const found = list.find(([e]) => e === value);
-      return found
-        ? `<span class="emo">${found[0]}</span><span class="label">${found[1]}</span>`
-        : `<span class="emo">＋</span><span class="label">${name}</span>`;
-    };
-    els.moodBtn.innerHTML = label(MOODS, entry.mood, 'Mood');
-    els.moodBtn.title = 'Mood';
-    els.moodBtn.classList.toggle('set', !!entry.mood);
-    els.weatherBtn.innerHTML = label(WEATHERS, entry.weather, 'Weather');
-    els.weatherBtn.title = 'Weather';
-    els.weatherBtn.classList.toggle('set', !!entry.weather);
-    els.moodPop.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === entry.mood && !!b.dataset.v));
-    els.weatherPop.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === entry.weather && !!b.dataset.v));
-    // Pickers where several can be chosen: the button shows all the emoji, and "n sports" when more than one.
-    const multiLabel = (btn, pop, list, picked, name, many) => {
-      const chosen = list.filter(([emo]) => picked.includes(emo));
-      btn.innerHTML = chosen.length
-        ? `<span class="emo">${chosen.map(([emo]) => emo).join('')}</span><span class="label">${chosen.length === 1 ? chosen[0][1] : `${chosen.length} ${many}`}</span>`
-        : `<span class="emo">＋</span><span class="label">${name}</span>`;
-      btn.classList.toggle('set', chosen.length > 0);
-      btn.title = name;
+    const pickLabel = (btn, pop, key, list, picked, multi = false) => {
+      const { html, title } = pickContent(key, list, picked);
+      btn.innerHTML = html;
+      btn.title = title;
+      btn.setAttribute('aria-label', title);
+      btn.classList.toggle('set', picked.some(v => list.some(([e]) => e === v)));
       pop.querySelectorAll('button').forEach(b => {
-        const on = picked.includes(b.dataset.v);
+        const on = !!b.dataset.v && picked.includes(b.dataset.v);
         b.classList.toggle('on', on);
-        if (b.dataset.v) b.setAttribute('aria-pressed', on);
+        if (multi && b.dataset.v) b.setAttribute('aria-pressed', on);
       });
     };
-    multiLabel(els.sportBtn, els.sportPop, SPORTS, entry.sports, 'Sport', 'sports');
-    multiLabel(els.activityBtn, els.activityPop, ACTIVITIES, entry.activities, 'Activity', 'activities');
+    pickLabel(els.moodBtn, els.moodPop, 'mood', MOODS, [entry.mood]);
+    pickLabel(els.weatherBtn, els.weatherPop, 'weather', WEATHERS, [entry.weather]);
+    pickLabel(els.sportBtn, els.sportPop, 'sports', SPORTS, entry.sports, true);
+    pickLabel(els.activityBtn, els.activityPop, 'activities', ACTIVITIES, entry.activities, true);
     els.shareBtn.innerHTML = entry.shared
       ? '<span class="emo">👫</span><span class="label">Friends can read</span>'
       : '<span class="emo">🔒</span><span class="label">Only me</span>';
@@ -1354,9 +1360,11 @@
   function readonlyPageHtml(entry, ownerId) {
     const t = THEMES[entry.theme] || THEMES.cat;
     const d = parseDate(entry.date);
-    const tag = (list, value) => {
-      const found = list.find(([emo]) => emo === value);
-      return found ? `<span class="pick-btn set"><span class="emo">${found[0]}</span><span class="label">${found[1]}</span></span>` : '';
+    // Only what was chosen; values are known emoji (sanitizeEntry), names come from the lists.
+    const tag = (key, list, picked) => {
+      if (!picked.some(v => list.some(([e]) => e === v))) return '';
+      const { html, title } = pickContent(key, list, picked);
+      return `<span class="pick-btn set" title="${escape(title)}">${html}</span>`;
     };
     const bottom = entry.stickers.reduce((max, st) => Math.max(max, st.y + stickerHeight(st) / 2), 0);
     const stickers = entry.stickers.map((st, i) => {
@@ -1373,7 +1381,8 @@
       `<div class="page-head"><div class="date-badge"><span class="date-day">${d.getDate()}</span><span class="date-meta">` +
       `<span class="date-month">${d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>` +
       `<span class="date-week">${d.toLocaleDateString(undefined, { weekday: 'long' })}</span></span></div>` +
-      `${tag(MOODS, entry.mood)}${tag(WEATHERS, entry.weather)}${entry.sports.map(v => tag(SPORTS, v)).join('')}${entry.activities.map(v => tag(ACTIVITIES, v)).join('')}</div>` +
+      `<div class="picks">${tag('mood', MOODS, [entry.mood])}${tag('weather', WEATHERS, [entry.weather])}` +
+      `${tag('sports', SPORTS, entry.sports)}${tag('activities', ACTIVITIES, entry.activities)}</div></div>` +
       `<h2 class="entry-title">${escape(entry.title || 'Untitled page')}</h2>` +
       `<div class="entry-body">${mentionHtml(entry.body)}</div>` +
       `<div class="sticker-layer">${stickers}</div></article></div>`;

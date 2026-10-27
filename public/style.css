@@ -443,7 +443,8 @@ button, input, textarea { font: inherit; color: inherit; }
   align-items: center;
   gap: 10px;
   margin-bottom: 16px;
-  padding-right: 120px;
+  --head-pad: 120px; /* room for the template's decoration in the top right corner */
+  padding-right: var(--head-pad);
 }
 
 .date-wrap { position: relative; }
@@ -510,7 +511,29 @@ button, input, textarea { font: inherit; color: inherit; }
   cursor: pointer;
 }
 .pick-btn.set { border-style: solid; border-color: var(--accent-soft); background: var(--accent-soft); color: var(--ink); }
-.pick-btn .emo { font-family: var(--font-emoji); font-size: 20px; }
+.pick-btn .emo { flex: none; font-family: var(--font-emoji); font-size: 20px; }
+.pick-btn .emo small { margin-left: 2px; font-family: var(--font-ui); font-size: 12px; }
+.pick-btn .emo.many .narrow { display: none; }
+.pick-btn .emo.hint { filter: grayscale(1); opacity: .45; }
+.pick-btn .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Mood, weather, sport and activity: always together on their own row under the date. That row is below
+   the corner decoration, so it may use half of the room kept for it. Names show when the row is wide
+   enough (and shorten with "…" if tight); narrower rows show emoji only. */
+.picks { container-type: inline-size; display: flex; flex: 1 1 100%; gap: 8px; min-width: 0; margin-right: calc(var(--head-pad) / -2); }
+.picks .picker { flex: 0 1 auto; min-width: 0; }
+.picks .pick-btn { max-width: 100%; }
+@container (max-width: 460px) {
+  .picks .pick-btn .label, .picks .emo.many .wide { display: none; }
+  .picks .emo.many .narrow { display: inline; }
+  .picks .pick-btn { padding: 0 9px; }
+}
+@container (max-width: 260px) {
+  .picks { gap: 6px; }
+  .picks .pick-btn { gap: 2px; padding: 0 6px; }
+  .picks .pick-btn .emo { font-size: 18px; }
+  .picks .pick-btn .emo small { font-size: 11px; }
+}
 .pop {
   position: absolute;
   top: calc(100% + 6px);
@@ -938,7 +961,7 @@ button, input, textarea { font: inherit; color: inherit; }
   .top-actions .label { display: none; }
   .page { padding: 24px 18px var(--page-pb) 58px; min-height: max(600px, var(--sticker-bottom, 0px)); }
   .page::before { left: 12px; width: 16px; background-size: 16px 38px; }
-  .page-head { padding-right: 60px; gap: 8px; }
+  .page-head { --head-pad: 60px; gap: 8px; }
   .pick-btn .label { display: none; }
   .ear { top: -42px; width: 70px; height: 54px; }
   .sakura-branch { width: 150px; top: -32px; right: -16px; }
